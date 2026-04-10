@@ -21,7 +21,7 @@ let APP_STATE = {
 };
 
 // =========================================================================================
-// 2. THUẬT TOÁN V6 - PHÁ CẦU HOÀN THIỆN (Xử lý tốt bệt ngắn & các kiểu cầu)
+// 2. THUẬT TOÁN V6 - PHÁ CẦU HOÀN THIỆN
 // =========================================================================================
 class SmartPredictor {
     predict(history) {
@@ -36,7 +36,7 @@ class SmartPredictor {
         const results = history.map(h => h.result);
         const last = results[results.length - 1];
 
-        // Tính độ dài bệt hiện tại
+        // Tính độ dài bệt
         let chain = 1;
         for (let i = results.length - 2; i >= 0; i--) {
             if (results[i] === last) chain++;
@@ -52,7 +52,7 @@ class SmartPredictor {
             }
         }
 
-        // Kiểm tra cầu nhịp 2-2 hoặc 3-3
+        // Kiểm tra cầu nhịp đôi (2-2, 3-3)
         let isDouble = true;
         for (let i = 2; i < Math.min(8, results.length); i += 2) {
             if (results[i] !== results[i - 2]) {
@@ -61,7 +61,7 @@ class SmartPredictor {
             }
         }
 
-        // === LOGIC PHÁ CẦU & BÁM CẦU HOÀN THIỆN ===
+        // === LOGIC PHÁ CẦU & BÁM CẦU ===
         if (chain >= 7) {
             return { 
                 ketqua: last === 'Tài' ? 'Xỉu' : 'Tài', 
@@ -79,7 +79,6 @@ class SmartPredictor {
         }
 
         if (chain === 4) {
-            // Bệt 4 tay → rủi ro gãy cao → giảm tin cậy + cảnh báo
             return { 
                 ketqua: last === 'Tài' ? 'Xỉu' : 'Tài', 
                 confidence: '68%', 
@@ -88,7 +87,6 @@ class SmartPredictor {
         }
 
         if (chain === 3) {
-            // Bệt 3 tay → không bám mạnh, ưu tiên quan sát
             return { 
                 ketqua: last, 
                 confidence: '69%', 
@@ -96,7 +94,7 @@ class SmartPredictor {
             };
         }
 
-        // Ưu tiên cao với cầu 1-1
+        // Ưu tiên cầu 1-1
         if (isZigzag && results.length >= 5) {
             return { 
                 ketqua: last === 'Tài' ? 'Xỉu' : 'Tài', 
@@ -105,7 +103,7 @@ class SmartPredictor {
             };
         }
 
-        // Cầu nhịp 2-2 hoặc 3-3
+        // Cầu nhịp đôi
         if (isDouble && results.length >= 6) {
             return { 
                 ketqua: last === 'Tài' ? 'Xỉu' : 'Tài', 
@@ -114,7 +112,7 @@ class SmartPredictor {
             };
         }
 
-        // Mặc định đảo cầu (an toàn nhất khi không rõ nhịp)
+        // Mặc định
         return { 
             ketqua: last === 'Tài' ? 'Xỉu' : 'Tài', 
             confidence: '64%', 
@@ -126,7 +124,7 @@ class SmartPredictor {
 const predictor = new SmartPredictor();
 
 // =========================================================================================
-// 3. ĐỒNG BỘ DỮ LIỆU (Giữ nguyên ổn định)
+// 3. ĐỒNG BỘ DỮ LIỆU - PHIÊN BẢN LINH HOẠT (SỬA LỖI CHÍNH)
 // =========================================================================================
 async function syncGameData(type) {
     try {
@@ -141,28 +139,53 @@ async function syncGameData(type) {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
         const data = await response.json();
-        const rawList = data.list || [];
+
+        // Hỗ trợ nhiều cấu trúc API
+        let rawList = [];
+        if (Array.isArray(data)) rawList = data;
+        else if (data.list) rawList = data.list;
+        else if (data.data) rawList = data.data;
+        else if (data.results) rawList = data.results;
 
         if (!Array.isArray(rawList) || rawList.length === 0) {
-            console.log(`[TUANX3000-V6] ${type} → Không có dữ liệu mới`);
+            console.log(`[TUANX3000-V6] ${type} → Không có dữ liệu`);
             return;
         }
 
         const state = APP_STATE[type];
 
         const newHistory = rawList.map(item => {
-            let resRaw = String(item.resultTruyenThong || '').toUpperCase().trim();
+            let resRaw = String(
+                item.resultTruyenThong || 
+                item.result || 
+                item.BetSide || 
+                item.betSide || 
+                item.resultMd5 || 
+                ''
+            ).toUpperCase().trim();
+
             let finalRes = 'Xỉu';
-            if (resRaw === 'TAI' || resRaw === 'TÀI') finalRes = 'Tài';
-            else if (resRaw === 'XIU' || resRaw === 'XỈU') finalRes = 'Xỉu';
+            if (resRaw.includes('TAI') || resRaw.includes('TÀI') || resRaw === 'T' || resRaw === '1') {
+                finalRes = 'Tài';
+            } else if (resRaw.includes('XIU') || resRaw.includes('XỈU') || resRaw === 'X') {
+                finalRes = 'Xỉu';
+            } 
+            // Hỗ trợ DiceSum nếu có
+            else if (item.DiceSum) {
+                const sum = Number(item.DiceSum);
+                finalRes = (sum >= 11 && sum <= 17) ? 'Tài' : 'Xỉu';
+            }
 
             return {
-                session: Number(item.id || 0),
+                session: Number(item.id || item.SessionId || item.session || 0),
                 result: finalRes
             };
         }).filter(h => h.session > 0).reverse();
 
-        if (newHistory.length === 0) return;
+        if (newHistory.length === 0) {
+            console.log(`[TUANX3000-V6] ${type} → Không parse được dữ liệu`);
+            return;
+        }
 
         const latest = newHistory[newHistory.length - 1];
 
@@ -245,7 +268,7 @@ app.get('/reset', (req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`🚀 TUANX3000: TX-PREDICTOR-V6-FINAL (Phá cầu hoàn thiện) ONLINE PORT ${PORT}`);
+    console.log(`🚀 TUANX3000: TX-PREDICTOR-V6-FINAL ONLINE PORT ${PORT}`);
     syncGameData('nohu');
     syncGameData('md5');
 });
