@@ -1,11 +1,11 @@
 'use strict';
 
 /**
- * TUANX3000 ULTIMATE V11.9 GROK V3 SAFE MODE - SINGLE FILE FULL
- * - Sử dụng Grok v3 (grok-3)
- * - Grok fail → tự động fallback về Railway Core
- * - Hybrid ưu tiên Code nếu Grok lỗi
- * - UI gốc 100% + mọi chức năng đầy đủ
+ * TUANX3000 ULTIMATE V11.9 GROK V3 FINAL FULL - SINGLE FILE
+ * - Grok v3 chính thức
+ * - Safe fallback: Grok lỗi → Railway Core
+ * - Hybrid ưu tiên Code
+ * - UI gốc 100% + mọi thuật toán đầy đủ
  */
 
 const express = require('express');
@@ -20,11 +20,11 @@ app.use(express.json());
 // ================== CONFIG ==================
 const CONFIG = {
   ADMIN: 'TUANX3000',
-  VERSION: '11.9 GROK V3 SAFE MODE',
-  SYNC_MS: 7000,                    // An toàn hơn cho Grok v3
-  FETCH_TIMEOUT_MS: 12000,
-  GROK_MODEL_PRIMARY: 'grok-3',     // ← Grok v3 chính thức
-  GROK_MODEL_FALLBACK: 'grok-3',    // Fallback cũng dùng v3
+  VERSION: '11.9 GROK V3 FINAL FULL',
+  SYNC_MS: 8000,
+  FETCH_TIMEOUT_MS: 15000,
+  GROK_MODEL_PRIMARY: 'grok-3',
+  GROK_MODEL_FALLBACK: 'grok-3',
 
   ENDPOINTS: {
     NOHU: 'https://taixiu.maksh3979madfw.com/api/luckydice/GetSoiCau?access_token=05%2F7JlwSPGzFBT3sGaKY2ZcLjROdAOOPB3UwDAmuWFKyfHGWuuM%2BC2zy%2FjjnuznAdeJ1hnJUb8IJnvmUDf44qzL49F2ysXpxi9Qj3ZQZ6ahSqlIQmeUS94Mz3ywCtmnj6ssOz4%2BcY90Z%2FFIaUyLA7aw%2FSOcfQ5jEh4AWpcuvdekhs8XvL9mZS4qPwgCPexrDRWK4gHWx7n2akAHlUFDedm6o6uPDpIEA7z1BXADeLKqizH6WVpDMuD3pEFwdC0zHP2jJtVEQgvGeDGXWLSeSr%2F00etslH1TXwCrs%2BrD4Dj%2B3OmJ3VlTStd%2BirPOtXfmDIBLEr2fUlNRwt%2BRKzRuxt3piAyOlfP1UjrYRX7ekIiTrO%2BYBr3m%2FKDgomuTf2vrP6KqCW%2F2hEdU%3D.14abebf71302f5cce8f3d94ed438ba5c1d31a484d0319b3172db76015a64b4d7',
@@ -35,9 +35,9 @@ const CONFIG = {
 };
 
 if (CONFIG.GROK_API_KEY) {
-  console.log('✅ GROK v3 loaded - Ready (fallback to Core nếu lỗi)');
+  console.log('✅ GROK v3 loaded - Ready');
 } else {
-  console.log('ℹ️  Grok disabled - Chỉ dùng Railway Core (an toàn tuyệt đối)');
+  console.log('ℹ️ Grok disabled → Chỉ dùng Railway Core (an toàn)');
 }
 
 // ================== FETCH & DATA STORE ==================
@@ -124,13 +124,14 @@ const Algos = {
   }
 };
 
-// ================== GROK V3 - SAFE FALLBACK ==================
+// ================== GROK V3 ==================
 async function callGrok(mode) {
   if (!CONFIG.GROK_API_KEY) {
-    return { du_doan: 'XỈU', tin_cay: '50%', phan_tich: 'Grok disabled - Fallback to Core' };
+    return null; // fallback ngay
   }
 
-  const sequence = DATA_STORE[mode].history.slice(-15).map(x => x.result).join(' → ');
+  const sequence = DATA_STORE[mode].history.slice(-12).map(x => x.result).join(' → ');
+
   const models = [CONFIG.GROK_MODEL_PRIMARY, CONFIG.GROK_MODEL_FALLBACK];
 
   for (const model of models) {
@@ -147,7 +148,7 @@ async function callGrok(mode) {
             { role: 'user', content: `History ${mode.toUpperCase()}: ${sequence}\nPredict next. Return exactly: {"du_doan":"TÀI","tin_cay":"80%","phan_tich":"reason"}` }
           ],
           temperature: 0.2,
-          max_tokens: 250
+          max_tokens: 200
         })
       });
 
@@ -174,7 +175,7 @@ async function callGrok(mode) {
   }
 
   console.log(`[GROK v3] Fallback to Railway Core for ${mode}`);
-  return null; // Trả về null để hybrid biết mà fallback
+  return null;
 }
 
 // ================== SYNC ENGINE ==================
@@ -219,11 +220,11 @@ async function runSync() {
   }
 }
 
-// ================== GLOBAL ERROR ==================
+// ================== GLOBAL ERROR HANDLING ==================
 process.on('unhandledRejection', (reason) => console.error('Unhandled Rejection:', reason));
 process.on('uncaughtException', (err) => console.error('Uncaught Exception:', err));
 
-// ================== UI DASHBOARD (giữ nguyên 100% như bản gốc) ==================
+// ================== UI DASHBOARD (giữ nguyên 100% bản gốc) ==================
 app.get('/', (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(`
@@ -347,5 +348,5 @@ app.listen(PORT, '0.0.0.0', () => {
   setTimeout(() => {
     runSync();
     setInterval(runSync, CONFIG.SYNC_MS);
-  }, 2000);
+  }, 2500);
 });
