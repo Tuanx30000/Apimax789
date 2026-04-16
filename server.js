@@ -1,11 +1,13 @@
 'use strict';
 
 /**
- * TUANX3000 ULTIMATE V11.9 GROK V3 FINAL FULL - SINGLE FILE
- * - Grok v3 chính thức
- * - Safe fallback: Grok lỗi → Railway Core
- * - Hybrid ưu tiên Code
- * - UI gốc 100% + mọi thuật toán đầy đủ
+ * TUANX3000 ULTIMATE V12.1 HYBRID VOTING FULL - SINGLE FILE COMPLETE
+ * - Multi-AI: Grok 4.20 + OpenAI + Gemini
+ * - Hybrid Voting: Gom tất cả AI + Railway Core → Vote (Consensus)
+ * - AI nào đồng ý nhiều nhất sẽ thắng (tính cả confidence)
+ * - Grok/OpenAI/Gemini lỗi hoặc không có key → tự fallback về Railway Core
+ * - UI gốc 100% như bản đầu tiên bạn đưa
+ * - Tất cả thuật toán, stats, sync anti-deadlock đầy đủ
  */
 
 const express = require('express');
@@ -20,25 +22,28 @@ app.use(express.json());
 // ================== CONFIG ==================
 const CONFIG = {
   ADMIN: 'TUANX3000',
-  VERSION: '11.9 GROK V3 FINAL FULL',
+  VERSION: '12.1 HYBRID VOTING FULL',
   SYNC_MS: 8000,
   FETCH_TIMEOUT_MS: 15000,
-  GROK_MODEL_PRIMARY: 'grok-3',
-  GROK_MODEL_FALLBACK: 'grok-3',
+
+  GROK_MODEL: 'grok-4.20-0309-non-reasoning',
+  OPENAI_MODEL: 'gpt-4o-mini',
+  GEMINI_MODEL: 'gemini-2.5-flash',
 
   ENDPOINTS: {
     NOHU: 'https://taixiu.maksh3979madfw.com/api/luckydice/GetSoiCau?access_token=05%2F7JlwSPGzFBT3sGaKY2ZcLjROdAOOPB3UwDAmuWFKyfHGWuuM%2BC2zy%2FjjnuznAdeJ1hnJUb8IJnvmUDf44qzL49F2ysXpxi9Qj3ZQZ6ahSqlIQmeUS94Mz3ywCtmnj6ssOz4%2BcY90Z%2FFIaUyLA7aw%2FSOcfQ5jEh4AWpcuvdekhs8XvL9mZS4qPwgCPexrDRWK4gHWx7n2akAHlUFDedm6o6uPDpIEA7z1BXADeLKqizH6WVpDMuD3pEFwdC0zHP2jJtVEQgvGeDGXWLSeSr%2F00etslH1TXwCrs%2BrD4Dj%2B3OmJ3VlTStd%2BirPOtXfmDIBLEr2fUlNRwt%2BRKzRuxt3piAyOlfP1UjrYRX7ekIiTrO%2BYBr3m%2FKDgomuTf2vrP6KqCW%2F2hEdU%3D.14abebf71302f5cce8f3d94ed438ba5c1d31a484d0319b3172db76015a64b4d7',
     MD5: 'https://taixiumd5.maksh3979madfw.com/api/md5luckydice/GetSoiCau?access_token=05%2F7JlwSPGzFBT3sGaKY2ZcLjROdAOOPB3UwDAmuWFKyfHGWuuM%2BC2zy%2FjjnuznAdeJ1hnJUb8IJnvmUDf44qzL49F2ysXpxi9Qj3ZQZ6ahSqlIQmeUS94Mz3ywCtmnj6ssOz4%2BcY90Z%2FFIaUyLA7aw%2FSOcfQ5jEh4AWpcuvdekhs8XvL9mZS4qPwgCPexrDRWK4gHWx7n2akAHlUFDedm6o6uPDpIEA7z1BXADeLKqizH6WVpDMuD3pEFwdC0zHP2jJtVEQgvGeDGXWLSeSr%2F00etslH1TXwCrs%2BrD4Dj%2B3OmJ3VlTStd%2BirPOtXfmDIBLEr2fUlNRwt%2BRKzRuxt3piAyOlfP1UjrYRX7ekIiTrO%2BYBr3m%2FKDgomuTf2vrP6KqCW%2F2hEdU%3D.14abebf71302f5cce8f3d94ed438ba5c1d31a484d0319b3172db76015a64b4d7'
   },
 
-  GROK_API_KEY: (process.env.GROK_API_KEY || '').trim()
+  GROK_API_KEY: (process.env.GROK_API_KEY || '').trim(),
+  OPENAI_API_KEY: (process.env.OPENAI_API_KEY || '').trim(),
+  GEMINI_API_KEY: (process.env.GEMINI_API_KEY || '').trim()
 };
 
-if (CONFIG.GROK_API_KEY) {
-  console.log('✅ GROK v3 loaded - Ready');
-} else {
-  console.log('ℹ️ Grok disabled → Chỉ dùng Railway Core (an toàn)');
-}
+console.log('🔧 Multi-AI Voting System Loaded');
+console.log('Grok:', CONFIG.GROK_API_KEY ? '✅' : '❌');
+console.log('OpenAI:', CONFIG.OPENAI_API_KEY ? '✅' : '❌');
+console.log('Gemini:', CONFIG.GEMINI_API_KEY ? '✅' : '❌');
 
 // ================== FETCH & DATA STORE ==================
 const fetchFn = global.fetch || null;
@@ -124,58 +129,105 @@ const Algos = {
   }
 };
 
-// ================== GROK V3 ==================
-async function callGrok(mode) {
-  if (!CONFIG.GROK_API_KEY) {
-    return null; // fallback ngay
+// ================== CALL SINGLE AI ==================
+async function callSingleAI(name, apiKey, model, endpoint, body) {
+  if (!apiKey) return null;
+  try {
+    const res = await fetchFn(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: name !== 'gemini' ? `Bearer ${apiKey}` : undefined },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    let content = '';
+    if (name === 'grok') content = data?.choices?.[0]?.message?.content || '';
+    if (name === 'openai') content = data?.choices?.[0]?.message?.content || '';
+    if (name === 'gemini') content = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+    content = content.replace(/```json|```/gi, '').trim();
+    const match = content.match(/\{[\s\S]*?\}/);
+    if (!match) return null;
+
+    const parsed = JSON.parse(match[0]);
+    return {
+      du_doan: normalizePrediction(parsed.du_doan),
+      tin_cay: parsed.tin_cay || '75%',
+      phan_tich: parsed.phan_tich || name
+    };
+  } catch (err) {
+    console.error(`[${name}] Fail:`, err.message);
+    return null;
   }
+}
+
+// ================== HYBRID VOTING (GOM AI + VOTE) ==================
+async function hybridVoting(mode) {
+  const core = Algos.railwayCore(mode);
+  const votes = [{ source: 'Core', prediction: normalizePrediction(core.res), confidence: parseFloat(core.conf) || 70 }];
 
   const sequence = DATA_STORE[mode].history.slice(-12).map(x => x.result).join(' → ');
+  const prompt = `History ${mode.toUpperCase()}: ${sequence}\nPredict next. Return exactly: {"du_doan":"TÀI","tin_cay":"82%","phan_tich":"reason"}`;
 
-  const models = [CONFIG.GROK_MODEL_PRIMARY, CONFIG.GROK_MODEL_FALLBACK];
+  // Gọi song song tất cả AI
+  const promises = [];
 
-  for (const model of models) {
-    try {
-      console.log(`[GROK v3] Trying ${model} for ${mode.toUpperCase()}`);
-
-      const response = await fetchFn('https://api.x.ai/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${CONFIG.GROK_API_KEY}` },
-        body: JSON.stringify({
-          model: model,
-          messages: [
-            { role: 'system', content: 'Expert analyst. Reply ONLY valid JSON.' },
-            { role: 'user', content: `History ${mode.toUpperCase()}: ${sequence}\nPredict next. Return exactly: {"du_doan":"TÀI","tin_cay":"80%","phan_tich":"reason"}` }
-          ],
-          temperature: 0.2,
-          max_tokens: 200
-        })
-      });
-
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-      const data = await response.json();
-      let content = data?.choices?.[0]?.message?.content || '';
-      content = content.replace(/```json|```/gi, '').trim();
-      const match = content.match(/\{[\s\S]*?\}/);
-      if (!match) throw new Error('No JSON');
-
-      const parsed = JSON.parse(match[0]);
-
-      console.log(`[GROK v3 SUCCESS] ${mode.toUpperCase()}`);
-      return {
-        du_doan: normalizePrediction(parsed.du_doan),
-        tin_cay: parsed.tin_cay || '80%',
-        phan_tich: parsed.phan_tich || 'Grok v3 analysis'
-      };
-
-    } catch (err) {
-      console.error(`[GROK v3 FAIL] ${model} - ${mode}: ${err.message}`);
-    }
+  if (CONFIG.GROK_API_KEY) {
+    promises.push(callSingleAI('grok', CONFIG.GROK_API_KEY, CONFIG.GROK_MODEL,
+      'https://api.x.ai/v1/chat/completions',
+      { model: CONFIG.GROK_MODEL, messages: [{role:'system', content:'Reply ONLY JSON'}, {role:'user', content: prompt}], temperature: 0.2, max_tokens: 180 })
+      .then(r => r ? { source: 'Grok', prediction: r.du_doan, confidence: parseFloat(r.tin_cay) || 80 } : null));
   }
 
-  console.log(`[GROK v3] Fallback to Railway Core for ${mode}`);
-  return null;
+  if (CONFIG.OPENAI_API_KEY) {
+    promises.push(callSingleAI('openai', CONFIG.OPENAI_API_KEY, CONFIG.OPENAI_MODEL,
+      'https://api.openai.com/v1/chat/completions',
+      { model: CONFIG.OPENAI_MODEL, messages: [{role:'system', content:'Reply ONLY JSON'}, {role:'user', content: prompt}], temperature: 0.2, max_tokens: 180 })
+      .then(r => r ? { source: 'OpenAI', prediction: r.du_doan, confidence: parseFloat(r.tin_cay) || 80 } : null));
+  }
+
+  if (CONFIG.GEMINI_API_KEY) {
+    promises.push(callSingleAI('gemini', CONFIG.GEMINI_API_KEY, CONFIG.GEMINI_MODEL,
+      `https://generativelanguage.googleapis.com/v1beta/models/${CONFIG.GEMINI_MODEL}:generateContent?key=${CONFIG.GEMINI_API_KEY}`,
+      { contents: [{ parts: [{ text: prompt }] }] })
+      .then(r => r ? { source: 'Gemini', prediction: r.du_doan, confidence: parseFloat(r.tin_cay) || 80 } : null));
+  }
+
+  const aiResults = (await Promise.all(promises)).filter(Boolean);
+  votes.push(...aiResults);
+
+  // Tally vote
+  const tally = {};
+  votes.forEach(v => {
+    const key = v.prediction;
+    if (!tally[key]) tally[key] = { count: 0, totalConf: 0 };
+    tally[key].count++;
+    tally[key].totalConf += v.confidence;
+  });
+
+  // Chọn kết quả thắng cuộc (ưu tiên số vote, sau đó confidence)
+  let winner = { prediction: 'Xỉu', confidence: 70, sources: ['Core'] };
+  let maxScore = 0;
+
+  Object.keys(tally).forEach(key => {
+    const score = tally[key].count * 100 + (tally[key].totalConf / tally[key].count);
+    if (score > maxScore) {
+      maxScore = score;
+      winner = {
+        prediction: key,
+        confidence: Math.round(tally[key].totalConf / tally[key].count),
+        sources: votes.filter(v => v.prediction === key).map(v => v.source)
+      };
+    }
+  });
+
+  const sourceList = winner.sources.join(' + ');
+  return {
+    res: winner.prediction,
+    conf: `${winner.confidence}%`,
+    log: `Voting (${sourceList}) → ${winner.prediction} thắng`
+  };
 }
 
 // ================== SYNC ENGINE ==================
@@ -220,7 +272,7 @@ async function runSync() {
   }
 }
 
-// ================== GLOBAL ERROR HANDLING ==================
+// ================== GLOBAL ERROR ==================
 process.on('unhandledRejection', (reason) => console.error('Unhandled Rejection:', reason));
 process.on('uncaughtException', (err) => console.error('Uncaught Exception:', err));
 
@@ -257,13 +309,15 @@ app.get('/', (req, res) => {
     <div class="tagline">System Engine Version ${escapeHtml(CONFIG.VERSION)}</div>
     <div class="grid">
       <a href="/api/dual-engine?provider=railway" class="btn">1. RAILWAY CORE ENGINE</a>
-      <a href="/api/dual-engine?provider=grok" class="btn">2. GROK V3 MASTER</a>
-      <a href="/api/dual-engine?provider=hybrid" class="btn special">3. HYBRID CONSENSUS (VIP)</a>
+      <a href="/api/dual-engine?provider=grok" class="btn">2. GROK 4.20</a>
+      <a href="/api/dual-engine?provider=openai" class="btn">3. OPENAI</a>
+      <a href="/api/dual-engine?provider=gemini" class="btn">4. GEMINI</a>
+      <a href="/api/dual-engine?provider=hybrid" class="btn special">5. HYBRID VOTING (VIP)</a>
     </div>
     <div class="panel">
       <div><strong>Health:</strong> <a href="/health" style="color:var(--neon-g)">/health</a></div>
       <div><strong>Stats:</strong> <a href="/api/stats" style="color:var(--neon-g)">/api/stats</a></div>
-      <div>Grok v3 Safe Mode - Fail sẽ tự fallback về Core</div>
+      <div>Multi-AI Voting - Tất cả AI cùng vote, kết quả tốt nhất thắng</div>
     </div>
     <div class="footer">ADMIN: ${escapeHtml(CONFIG.ADMIN)} | STATUS: ONLINE</div>
   </div>
@@ -296,21 +350,27 @@ app.get('/api/dual-engine', async (req, res) => {
     const lastSes = state.history.length > 0 ? state.history[state.history.length - 1].session : 0;
     let prediction;
 
-    if (provider === 'grok') {
-      const g = await callGrok(mode);
-      if (g) {
-        prediction = { res: g.du_doan, conf: g.tin_cay, log: `Grok v3: ${g.phan_tich}` };
-      } else {
-        prediction = Algos.railwayCore(mode);
-      }
-    } else if (provider === 'hybrid') {
-      const a = Algos.railwayCore(mode);
-      const g = await callGrok(mode);
-      if (g && normalizePrediction(a.res) === normalizePrediction(g.du_doan)) {
-        prediction = { res: a.res, conf: '96%', log: 'Consensus Met (Code & Grok v3 Agree)' };
-      } else {
-        prediction = a;
-      }
+    if (provider === 'hybrid') {
+      prediction = await hybridVoting(mode);
+    } else if (provider === 'grok') {
+      const g = await callSingleAI('grok', CONFIG.GROK_API_KEY, CONFIG.GROK_MODEL, 'https://api.x.ai/v1/chat/completions', {
+        model: CONFIG.GROK_MODEL,
+        messages: [{role:'system', content:'Reply ONLY JSON'}, {role:'user', content: `History ${mode.toUpperCase()}: ${state.history.slice(-12).map(x => x.result).join(' → ')}\nPredict next. Return exactly: {"du_doan":"TÀI","tin_cay":"82%","phan_tich":"reason"}`}],
+        temperature: 0.2, max_tokens: 180
+      });
+      prediction = g ? { res: g.du_doan, conf: g.tin_cay, log: `Grok 4.20: ${g.phan_tich}` } : Algos.railwayCore(mode);
+    } else if (provider === 'openai') {
+      const o = await callSingleAI('openai', CONFIG.OPENAI_API_KEY, CONFIG.OPENAI_MODEL, 'https://api.openai.com/v1/chat/completions', {
+        model: CONFIG.OPENAI_MODEL,
+        messages: [{role:'system', content:'Reply ONLY JSON'}, {role:'user', content: `History ${mode.toUpperCase()}: ${state.history.slice(-12).map(x => x.result).join(' → ')}\nPredict next. Return exactly: {"du_doan":"TÀI","tin_cay":"82%","phan_tich":"reason"}`}],
+        temperature: 0.2, max_tokens: 180
+      });
+      prediction = o ? { res: o.du_doan, conf: o.tin_cay, log: `OpenAI: ${o.phan_tich}` } : Algos.railwayCore(mode);
+    } else if (provider === 'gemini') {
+      const ge = await callSingleAI('gemini', CONFIG.GEMINI_API_KEY, CONFIG.GEMINI_MODEL, `https://generativelanguage.googleapis.com/v1beta/models/${CONFIG.GEMINI_MODEL}:generateContent?key=${CONFIG.GEMINI_API_KEY}`, {
+        contents: [{ parts: [{ text: `History ${mode.toUpperCase()}: ${state.history.slice(-12).map(x => x.result).join(' → ')}\nPredict next. Return exactly: {"du_doan":"TÀI","tin_cay":"82%","phan_tich":"reason"}` }] }]
+      });
+      prediction = ge ? { res: ge.du_doan, conf: ge.tin_cay, log: `Gemini: ${ge.phan_tich}` } : Algos.railwayCore(mode);
     } else {
       prediction = Algos.railwayCore(mode);
     }
