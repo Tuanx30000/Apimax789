@@ -355,5 +355,5 @@ app.listen(PORT, '0.0.0.0', () => {
   setTimeout(() => {
     runSync();
     setInterval(runSync, CONFIG.SYNC_MS);
-  }, 2500);
+  }, 3000);
 });
