@@ -1,8 +1,9 @@
 'use strict';
 
 /**
- * TUANX3000 ULTIMATE V11.9 SAFE DEFAULT MODE - SINGLE FILE FULL
- * - Bản an toàn nhất: Grok fail → tự động fallback về Railway Core
+ * TUANX3000 ULTIMATE V11.9 GROK V3 SAFE MODE - SINGLE FILE FULL
+ * - Sử dụng Grok v3 (grok-3)
+ * - Grok fail → tự động fallback về Railway Core
  * - Hybrid ưu tiên Code nếu Grok lỗi
  * - UI gốc 100% + mọi chức năng đầy đủ
  */
@@ -19,11 +20,11 @@ app.use(express.json());
 // ================== CONFIG ==================
 const CONFIG = {
   ADMIN: 'TUANX3000',
-  VERSION: '11.9 SAFE DEFAULT MODE',
-  SYNC_MS: 6000,                    // An toàn, giảm tải
+  VERSION: '11.9 GROK V3 SAFE MODE',
+  SYNC_MS: 7000,                    // An toàn hơn cho Grok v3
   FETCH_TIMEOUT_MS: 12000,
-  GROK_MODEL_PRIMARY: 'grok-3',
-  GROK_MODEL_FALLBACK: 'grok-3',
+  GROK_MODEL_PRIMARY: 'grok-3',     // ← Grok v3 chính thức
+  GROK_MODEL_FALLBACK: 'grok-3',    // Fallback cũng dùng v3
 
   ENDPOINTS: {
     NOHU: 'https://taixiu.maksh3979madfw.com/api/luckydice/GetSoiCau?access_token=05%2F7JlwSPGzFBT3sGaKY2ZcLjROdAOOPB3UwDAmuWFKyfHGWuuM%2BC2zy%2FjjnuznAdeJ1hnJUb8IJnvmUDf44qzL49F2ysXpxi9Qj3ZQZ6ahSqlIQmeUS94Mz3ywCtmnj6ssOz4%2BcY90Z%2FFIaUyLA7aw%2FSOcfQ5jEh4AWpcuvdekhs8XvL9mZS4qPwgCPexrDRWK4gHWx7n2akAHlUFDedm6o6uPDpIEA7z1BXADeLKqizH6WVpDMuD3pEFwdC0zHP2jJtVEQgvGeDGXWLSeSr%2F00etslH1TXwCrs%2BrD4Dj%2B3OmJ3VlTStd%2BirPOtXfmDIBLEr2fUlNRwt%2BRKzRuxt3piAyOlfP1UjrYRX7ekIiTrO%2BYBr3m%2FKDgomuTf2vrP6KqCW%2F2hEdU%3D.14abebf71302f5cce8f3d94ed438ba5c1d31a484d0319b3172db76015a64b4d7',
@@ -34,7 +35,7 @@ const CONFIG = {
 };
 
 if (CONFIG.GROK_API_KEY) {
-  console.log('✅ GROK_API_KEY loaded - Grok ready (fallback to Core nếu lỗi)');
+  console.log('✅ GROK v3 loaded - Ready (fallback to Core nếu lỗi)');
 } else {
   console.log('ℹ️  Grok disabled - Chỉ dùng Railway Core (an toàn tuyệt đối)');
 }
@@ -123,7 +124,7 @@ const Algos = {
   }
 };
 
-// ================== GROK AI - SAFE FALLBACK ==================
+// ================== GROK V3 - SAFE FALLBACK ==================
 async function callGrok(mode) {
   if (!CONFIG.GROK_API_KEY) {
     return { du_doan: 'XỈU', tin_cay: '50%', phan_tich: 'Grok disabled - Fallback to Core' };
@@ -134,7 +135,7 @@ async function callGrok(mode) {
 
   for (const model of models) {
     try {
-      console.log(`[GROK] Trying ${model} for ${mode.toUpperCase()}`);
+      console.log(`[GROK v3] Trying ${model} for ${mode.toUpperCase()}`);
 
       const response = await fetchFn('https://api.x.ai/v1/chat/completions', {
         method: 'POST',
@@ -160,19 +161,19 @@ async function callGrok(mode) {
 
       const parsed = JSON.parse(match[0]);
 
-      console.log(`[GROK SUCCESS] ${mode.toUpperCase()}`);
+      console.log(`[GROK v3 SUCCESS] ${mode.toUpperCase()}`);
       return {
         du_doan: normalizePrediction(parsed.du_doan),
         tin_cay: parsed.tin_cay || '80%',
-        phan_tich: parsed.phan_tich || 'Grok AI analysis'
+        phan_tich: parsed.phan_tich || 'Grok v3 analysis'
       };
 
     } catch (err) {
-      console.error(`[GROK FAIL] ${model} - ${mode}: ${err.message}`);
+      console.error(`[GROK v3 FAIL] ${model} - ${mode}: ${err.message}`);
     }
   }
 
-  console.log(`[GROK] Fallback to Railway Core for ${mode}`);
+  console.log(`[GROK v3] Fallback to Railway Core for ${mode}`);
   return null; // Trả về null để hybrid biết mà fallback
 }
 
@@ -255,13 +256,13 @@ app.get('/', (req, res) => {
     <div class="tagline">System Engine Version ${escapeHtml(CONFIG.VERSION)}</div>
     <div class="grid">
       <a href="/api/dual-engine?provider=railway" class="btn">1. RAILWAY CORE ENGINE</a>
-      <a href="/api/dual-engine?provider=grok" class="btn">2. GROK AI MASTER</a>
+      <a href="/api/dual-engine?provider=grok" class="btn">2. GROK V3 MASTER</a>
       <a href="/api/dual-engine?provider=hybrid" class="btn special">3. HYBRID CONSENSUS (VIP)</a>
     </div>
     <div class="panel">
       <div><strong>Health:</strong> <a href="/health" style="color:var(--neon-g)">/health</a></div>
       <div><strong>Stats:</strong> <a href="/api/stats" style="color:var(--neon-g)">/api/stats</a></div>
-      <div>Safe Default Mode - Grok fail sẽ tự fallback về Core</div>
+      <div>Grok v3 Safe Mode - Fail sẽ tự fallback về Core</div>
     </div>
     <div class="footer">ADMIN: ${escapeHtml(CONFIG.ADMIN)} | STATUS: ONLINE</div>
   </div>
@@ -297,17 +298,17 @@ app.get('/api/dual-engine', async (req, res) => {
     if (provider === 'grok') {
       const g = await callGrok(mode);
       if (g) {
-        prediction = { res: g.du_doan, conf: g.tin_cay, log: `Grok AI: ${g.phan_tich}` };
+        prediction = { res: g.du_doan, conf: g.tin_cay, log: `Grok v3: ${g.phan_tich}` };
       } else {
-        prediction = Algos.railwayCore(mode); // Fallback ngay
+        prediction = Algos.railwayCore(mode);
       }
     } else if (provider === 'hybrid') {
       const a = Algos.railwayCore(mode);
       const g = await callGrok(mode);
       if (g && normalizePrediction(a.res) === normalizePrediction(g.du_doan)) {
-        prediction = { res: a.res, conf: '96%', log: 'Consensus Met (Code & AI Agree)' };
+        prediction = { res: a.res, conf: '96%', log: 'Consensus Met (Code & Grok v3 Agree)' };
       } else {
-        prediction = a; // Ưu tiên Core khi Grok fail
+        prediction = a;
       }
     } else {
       prediction = Algos.railwayCore(mode);
