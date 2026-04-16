@@ -1,11 +1,11 @@
 'use strict';
 
 /**
- * TUANX3000 ULTIMATE V11.7 FINAL FIXED - SINGLE FILE FULL
- * - Fix hoàn toàn Grok AI fallback 50%
- * - Model chính xác 2026 (grok-4.20-0309-xxx)
- * - Parse JSON siêu mạnh
- * - UI gốc 100% + API chạy mượt
+ * TUANX3000 ULTIMATE V11.8 RATE LIMIT FIXED - SINGLE FILE FULL
+ * - Fix Grok rate limit (retry + backoff)
+ * - Model nhanh & ổn định nhất 2026
+ * - UI gốc 100% như bản đầu
+ * - Sync chậm hơn tránh overload
  */
 
 const express = require('express');
@@ -20,11 +20,11 @@ app.use(express.json());
 // ================== CONFIG ==================
 const CONFIG = {
   ADMIN: 'TUANX3000',
-  VERSION: '11.7 FINAL FIXED',
-  SYNC_MS: 3500,
-  FETCH_TIMEOUT_MS: 10000,
-  GROK_MODEL_PRIMARY: 'grok-4.20-0309-non-reasoning',
-  GROK_MODEL_FALLBACK: 'grok-4.20-0309-reasoning',
+  VERSION: '11.8 RATE LIMIT FIXED',
+  SYNC_MS: 5000,                    // Tăng để giảm gọi Grok
+  FETCH_TIMEOUT_MS: 12000,
+  GROK_MODEL_PRIMARY: 'grok-4.20-non-reasoning',
+  GROK_MODEL_FALLBACK: 'grok-4.20-reasoning',
 
   ENDPOINTS: {
     NOHU: 'https://taixiu.maksh3979madfw.com/api/luckydice/GetSoiCau?access_token=05%2F7JlwSPGzFBT3sGaKY2ZcLjROdAOOPB3UwDAmuWFKyfHGWuuM%2BC2zy%2FjjnuznAdeJ1hnJUb8IJnvmUDf44qzL49F2ysXpxi9Qj3ZQZ6ahSqlIQmeUS94Mz3ywCtmnj6ssOz4%2BcY90Z%2FFIaUyLA7aw%2FSOcfQ5jEh4AWpcuvdekhs8XvL9mZS4qPwgCPexrDRWK4gHWx7n2akAHlUFDedm6o6uPDpIEA7z1BXADeLKqizH6WVpDMuD3pEFwdC0zHP2jJtVEQgvGeDGXWLSeSr%2F00etslH1TXwCrs%2BrD4Dj%2B3OmJ3VlTStd%2BirPOtXfmDIBLEr2fUlNRwt%2BRKzRuxt3piAyOlfP1UjrYRX7ekIiTrO%2BYBr3m%2FKDgomuTf2vrP6KqCW%2F2hEdU%3D.14abebf71302f5cce8f3d94ed438ba5c1d31a484d0319b3172db76015a64b4d7',
@@ -35,9 +35,9 @@ const CONFIG = {
 };
 
 if (CONFIG.GROK_API_KEY) {
-  console.log('✅ GROK_API_KEY loaded OK - Grok AI ready');
+  console.log('✅ GROK_API_KEY loaded - Ready (Custom rate limits đang bật)');
 } else {
-  console.warn('⚠️ GROK_API_KEY chưa set - Grok sẽ fallback 50%');
+  console.warn('⚠️ GROK_API_KEY chưa set');
 }
 
 // ================== FETCH & DATA STORE ==================
@@ -54,7 +54,7 @@ const DATA_STORE = {
 
 let isSyncing = false;
 
-// ================== UTILS ==================
+// ================== UTILS (giữ nguyên) ==================
 function escapeHtml(value) {
   return String(value || '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -124,8 +124,8 @@ const Algos = {
   }
 };
 
-// ================== GROK AI - FIX LỖI CHÍNH ==================
-async function callGrok(mode) {
+// ================== GROK AI - RETRY + BACKOFF ==================
+async function callGrok(mode, retries = 2) {
   if (!CONFIG.GROK_API_KEY) {
     return { du_doan: 'XỈU', tin_cay: '50%', phan_tich: 'API Key chưa set' };
   }
@@ -133,52 +133,58 @@ async function callGrok(mode) {
   const sequence = DATA_STORE[mode].history.slice(-15).map(x => x.result).join(' → ');
   const models = [CONFIG.GROK_MODEL_PRIMARY, CONFIG.GROK_MODEL_FALLBACK];
 
-  for (const model of models) {
-    try {
-      console.log(`[GROK] Thử model: ${model} cho ${mode.toUpperCase()}`);
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    for (const model of models) {
+      try {
+        console.log(`[GROK Attempt ${attempt}] Model: ${model} - ${mode.toUpperCase()}`);
 
-      const response = await fetchFn('https://api.x.ai/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${CONFIG.GROK_API_KEY}` },
-        body: JSON.stringify({
-          model: model,
-          messages: [
-            { role: 'system', content: 'Expert gambling analyst. Reply ONLY with valid JSON. No markdown, no extra text.' },
-            { role: 'user', content: `History ${mode.toUpperCase()}: ${sequence}\nDự đoán ván sau (TÀI hoặc XỈU). Trả về DUY NHẤT JSON:\n{"du_doan":"TÀI","tin_cay":"85%","phan_tich":"lý do ngắn gọn"}` }
-          ],
-          temperature: 0.2,
-          max_tokens: 250
-        })
-      });
+        const response = await fetchFn('https://api.x.ai/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${CONFIG.GROK_API_KEY}` },
+          body: JSON.stringify({
+            model: model,
+            messages: [
+              { role: 'system', content: 'Expert analyst. Reply ONLY valid JSON, no markdown.' },
+              { role: 'user', content: `History ${mode.toUpperCase()}: ${sequence}\nPredict next (TÀI/XỈU). Return exactly: {"du_doan":"TÀI","tin_cay":"85%","phan_tich":"short reason"}` }
+            ],
+            temperature: 0.2,
+            max_tokens: 250
+          })
+        });
 
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) {
+          if (response.status === 429) throw new Error('RATE_LIMIT_EXCEEDED');
+          throw new Error(`HTTP ${response.status}`);
+        }
 
-      const data = await response.json();
-      let content = data?.choices?.[0]?.message?.content || '';
+        const data = await response.json();
+        let content = data?.choices?.[0]?.message?.content || '';
 
-      console.log(`[GROK Raw Content] ${mode}: ${content.substring(0, 200)}...`);
+        content = content.replace(/```json|```/gi, '').trim();
+        const match = content.match(/\{[\s\S]*?\}/);
+        if (!match) throw new Error('No JSON');
 
-      // PARSE SIÊU MẠNH
-      content = content.replace(/```json|```/gi, '').trim();
-      const jsonMatch = content.match(/\{[\s\S]*?\}/);
-      if (!jsonMatch) throw new Error('No JSON block');
+        const parsed = JSON.parse(match[0]);
 
-      const parsed = JSON.parse(jsonMatch[0]);
+        console.log(`[GROK SUCCESS] ${mode.toUpperCase()} - ${model}`);
+        return {
+          du_doan: normalizePrediction(parsed.du_doan),
+          tin_cay: parsed.tin_cay || '80%',
+          phan_tich: parsed.phan_tich || 'Grok AI analysis'
+        };
 
-      console.log(`[GROK SUCCESS] ${mode.toUpperCase()} - Model ${model}`);
-      return {
-        du_doan: normalizePrediction(parsed.du_doan),
-        tin_cay: parsed.tin_cay || '82%',
-        phan_tich: parsed.phan_tich || 'Phân tích bởi Grok AI'
-      };
-
-    } catch (err) {
-      console.error(`[GROK FAIL] ${model} - ${mode}: ${err.message}`);
-      await new Promise(r => setTimeout(r, 400)); // delay tránh rate limit
+      } catch (err) {
+        console.error(`[GROK FAIL Attempt ${attempt}] ${model} - ${mode}: ${err.message}`);
+        if (attempt < retries) {
+          const wait = attempt * 800;
+          console.log(`[GROK] Chờ ${wait}ms trước retry...`);
+          await new Promise(r => setTimeout(r, wait));
+        }
+      }
     }
   }
 
-  return { du_doan: 'XỈU', tin_cay: '50%', phan_tich: 'Grok API Error (rate limit hoặc model)' };
+  return { du_doan: 'XỈU', tin_cay: '50%', phan_tich: 'Rate limit hoặc model error (tắt Custom rate limits hoặc tăng giới hạn)' };
 }
 
 // ================== SYNC ENGINE ==================
@@ -223,7 +229,7 @@ async function runSync() {
   }
 }
 
-// ================== GLOBAL ERROR ==================
+// Global error
 process.on('unhandledRejection', (reason) => console.error('Unhandled Rejection:', reason));
 process.on('uncaughtException', (err) => console.error('Uncaught Exception:', err));
 
@@ -266,7 +272,7 @@ app.get('/', (req, res) => {
     <div class="panel">
       <div><strong>Health:</strong> <a href="/health" style="color:var(--neon-g)">/health</a></div>
       <div><strong>Stats:</strong> <a href="/api/stats" style="color:var(--neon-g)">/api/stats</a></div>
-      <div>Grok AI đã fix - Key active đến 16/5/2026</div>
+      <div>Rate limit fixed - Tắt Custom rate limits nếu vẫn lỗi</div>
     </div>
     <div class="footer">ADMIN: ${escapeHtml(CONFIG.ADMIN)} | STATUS: ONLINE</div>
   </div>
@@ -275,7 +281,7 @@ app.get('/', (req, res) => {
   `);
 });
 
-// ================== API ROUTES ==================
+// ================== API ROUTES (giữ nguyên) ==================
 app.get('/health', (req, res) => res.json({ ok: true, time: new Date().toISOString(), syncing: isSyncing, version: CONFIG.VERSION, grok_key_set: !!CONFIG.GROK_API_KEY }));
 
 app.get('/api/stats', (req, res) => {
@@ -349,5 +355,5 @@ app.listen(PORT, '0.0.0.0', () => {
   setTimeout(() => {
     runSync();
     setInterval(runSync, CONFIG.SYNC_MS);
-  }, 2000);
+  }, 2500);
 });
