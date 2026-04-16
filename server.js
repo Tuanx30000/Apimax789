@@ -1,14 +1,11 @@
 'use strict';
 
 /**
- * TUANX3000 ULTIMATE V11.4 FULL - WIN/LOSS SEPARATED & ENHANCED
- * - Tách biệt hoàn toàn Win/Loss cho từng thuật toán: Railway, Grok, Hybrid
- * - Stats độc lập theo từng provider
- * - Railway Core cải tiến với streak + pattern + balance
- * - Grok AI prompt tối ưu hơn
- * - Hybrid logic thông minh
- * - Dashboard UI đẹp + thông tin chi tiết
- * - Key lấy từ Environment Variables (Railway)
+ * TUANX3000 ULTIMATE V11.3 FIXED - SINGLE FILE FULL
+ * - Đã fix lỗi 50% treo trên Railway
+ * - Sync engine chống deadlock
+ * - Global error handling
+ * - Bind 0.0.0.0 chuẩn production
  */
 
 const express = require('express');
@@ -23,11 +20,12 @@ app.use(express.json());
 // ================== CONFIG ==================
 const CONFIG = {
   ADMIN: 'TUANX3000',
-  VERSION: '11.4 FULL - WIN/LOSS SEPARATED',
+  VERSION: '11.3 FIXED',
   SYNC_MS: 3000,
-  FETCH_TIMEOUT_MS: 8000,
+  FETCH_TIMEOUT_MS: 7000,
   GROK_MODEL: 'grok-4.20-reasoning',
 
+  // === ENDPOINTS (đã dán sẵn) ===
   ENDPOINTS: {
     NOHU: 'https://taixiu.maksh3979madfw.com/api/luckydice/GetSoiCau?access_token=05%2F7JlwSPGzFBT3sGaKY2ZcLjROdAOOPB3UwDAmuWFKyfHGWuuM%2BC2zy%2FjjnuznAdeJ1hnJUb8IJnvmUDf44qzL49F2ysXpxi9Qj3ZQZ6ahSqlIQmeUS94Mz3ywCtmnj6ssOz4%2BcY90Z%2FFIaUyLA7aw%2FSOcfQ5jEh4AWpcuvdekhs8XvL9mZS4qPwgCPexrDRWK4gHWx7n2akAHlUFDedm6o6uPDpIEA7z1BXADeLKqizH6WVpDMuD3pEFwdC0zHP2jJtVEQgvGeDGXWLSeSr%2F00etslH1TXwCrs%2BrD4Dj%2B3OmJ3VlTStd%2BirPOtXfmDIBLEr2fUlNRwt%2BRKzRuxt3piAyOlfP1UjrYRX7ekIiTrO%2BYBr3m%2FKDgomuTf2vrP6KqCW%2F2hEdU%3D.14abebf71302f5cce8f3d94ed438ba5c1d31a484d0319b3172db76015a64b4d7',
     MD5: 'https://taixiumd5.maksh3979madfw.com/api/md5luckydice/GetSoiCau?access_token=05%2F7JlwSPGzFBT3sGaKY2ZcLjROdAOOPB3UwDAmuWFKyfHGWuuM%2BC2zy%2FjjnuznAdeJ1hnJUb8IJnvmUDf44qzL49F2ysXpxi9Qj3ZQZ6ahSqlIQmeUS94Mz3ywCtmnj6ssOz4%2BcY90Z%2FFIaUyLA7aw%2FSOcfQ5jEh4AWpcuvdekhs8XvL9mZS4qPwgCPexrDRWK4gHWx7n2akAHlUFDedm6o6uPDpIEA7z1BXADeLKqizH6WVpDMuD3pEFwdC0zHP2jJtVEQgvGeDGXWLSeSr%2F00etslH1TXwCrs%2BrD4Dj%2B3OmJ3VlTStd%2BirPOtXfmDIBLEr2fUlNRwt%2BRKzRuxt3piAyOlfP1UjrYRX7ekIiTrO%2BYBr3m%2FKDgomuTf2vrP6KqCW%2F2hEdU%3D.14abebf71302f5cce8f3d94ed438ba5c1d31a484d0319b3172db76015a64b4d7'
@@ -37,41 +35,19 @@ const CONFIG = {
 };
 
 if (!CONFIG.GROK_API_KEY) {
-  console.warn('⚠️ GROK_API_KEY chưa được thiết lập. Hybrid & Grok AI sẽ dùng fallback.');
+  console.warn('⚠️ GROK_API_KEY chưa set trong Railway Variables → Grok fallback 50%');
 }
 
-// ================== FETCH SETUP ==================
-const fetchFn = global.fetch ? global.fetch.bind(global) : null;
+// ================== FETCH & DATA STORE ==================
+const fetchFn = global.fetch || null;
 if (!fetchFn) {
-  throw new Error('Node.js 18+ is required (global fetch missing)');
+  console.error('Node.js 18+ required');
+  process.exit(1);
 }
 
-// ================== DATA STORE ==================
 const DATA_STORE = {
-  nohu: {
-    history: [],
-    lastPrediction: { railway: null, grok: null, hybrid: null },
-    stats: {
-      railway: { win: 0, loss: 0, total: 0 },
-      grok:     { win: 0, loss: 0, total: 0 },
-      hybrid:   { win: 0, loss: 0, total: 0 }
-    },
-    processedSessions: new Set(),
-    lastSyncAt: null,
-    lastError: null
-  },
-  md5: {
-    history: [],
-    lastPrediction: { railway: null, grok: null, hybrid: null },
-    stats: {
-      railway: { win: 0, loss: 0, total: 0 },
-      grok:     { win: 0, loss: 0, total: 0 },
-      hybrid:   { win: 0, loss: 0, total: 0 }
-    },
-    processedSessions: new Set(),
-    lastSyncAt: null,
-    lastError: null
-  }
+  nohu: { history: [], lastPrediction: null, stats: { win: 0, loss: 0, total: 0 }, processedSessions: new Set(), lastSyncAt: null, lastError: null },
+  md5:  { history: [], lastPrediction: null, stats: { win: 0, loss: 0, total: 0 }, processedSessions: new Set(), lastSyncAt: null, lastError: null }
 };
 
 let isSyncing = false;
@@ -79,11 +55,8 @@ let isSyncing = false;
 // ================== UTILS ==================
 function escapeHtml(value) {
   return String(value || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 function toNumber(value) {
@@ -115,10 +88,11 @@ function standardizeResult(item = {}) {
 
 function mergeHistory(existing, incoming) {
   const map = new Map();
-  [...existing, ...incoming].forEach(item => {
-    if (item && item.session > 0) map.set(item.session, item);
-  });
-  return Array.from(map.values()).sort((a, b) => a.session - b.session).slice(-250);
+  for (const item of existing) if (item?.session > 0) map.set(item.session, item);
+  for (const item of incoming) if (item?.session > 0) map.set(item.session, item);
+  return Array.from(map.values())
+    .sort((a, b) => a.session - b.session)
+    .slice(-200);
 }
 
 function formatRate(win, total) {
@@ -141,52 +115,36 @@ async function fetchJsonWithTimeout(url, timeoutMs = CONFIG.FETCH_TIMEOUT_MS) {
   }
 }
 
-// ================== RAILWAY CORE ENGINE ==================
+// ================== RAILWAY CORE ALGO ==================
 const Algos = {
   railwayCore(mode) {
     const h = DATA_STORE[mode].history;
-    if (h.length < 12) {
-      return { res: 'N/A', conf: '0%', log: 'Đang thu thập dữ liệu...', streak: 0, balance: '0/20' };
+    if (h.length < 10) {
+      return { res: 'N/A', conf: '0%', log: 'Đang nạp dữ liệu sảnh...' };
     }
 
-    // Tính streak
-    let streak = 1;
-    const lastResult = h[h.length - 1].result;
-    for (let i = h.length - 2; i >= 0; i--) {
-      if (h[i].result === lastResult) streak++;
-      else break;
-    }
-
-    const last6 = h.slice(-6).map(x => x.result === 'Tài' ? 'T' : 'X').join('');
+    const last6 = h.slice(-6).map(x => (x.result === 'Tài' ? 'T' : 'X')).join('');
     const patterns = {
-      'TTTTTT': 'Xỉu', 'XXXXXX': 'Tài',
-      'TXTXTX': 'Tài', 'XTXTXT': 'Xỉu',
-      'TTXXTT': 'Xỉu', 'XXTTXX': 'Tài',
-      'TTTXXX': 'Tài', 'XXXTTT': 'Xỉu',
-      'TTTXTT': 'Xỉu', 'XXXTXX': 'Tài'
+      TTTTTT: 'X', XXXXXX: 'T', TXTXTX: 'T', XTXTXT: 'X',
+      TTXXTT: 'X', XXTTXX: 'T', TTTXXX: 'T', XXXTTT: 'X'
     };
 
     if (patterns[last6]) {
       return {
-        res: patterns[last6],
-        conf: streak >= 4 ? '90%' : '85%',
-        log: `Pattern mạnh: ${last6} | Streak ${streak} ${lastResult}`,
-        streak,
-        balance: `${h.slice(-20).filter(x => x.result === 'Tài').length}/20`
+        res: patterns[last6] === 'T' ? 'Tài' : 'Xỉu',
+        conf: '92%',
+        log: `Pattern Markov: ${last6}`
       };
     }
 
     const countT = h.slice(-20).filter(x => x.result === 'Tài').length;
-    if (countT >= 14) return { res: 'Xỉu', conf: '87%', log: `Tài nóng (${countT}/20)`, streak, balance: `${countT}/20` };
-    if (countT <= 6)  return { res: 'Tài', conf: '87%', log: `Xỉu nóng (${countT}/20)`, streak, balance: `${countT}/20` };
+    if (countT >= 13) return { res: 'Xỉu', conf: '84%', log: 'High Frequency Reset' };
+    if (countT <= 7) return { res: 'Tài', conf: '84%', log: 'Low Frequency Reset' };
 
-    const defaultRes = lastResult === 'Tài' ? 'Xỉu' : 'Tài';
     return {
-      res: defaultRes,
-      conf: streak >= 5 ? '78%' : '70%',
-      log: `Counter Trend | Streak ${streak}`,
-      streak,
-      balance: `${countT}/20`
+      res: h[h.length - 1].result === 'Tài' ? 'Xỉu' : 'Tài',
+      conf: '70%',
+      log: 'Counter-Trend Default'
     };
   }
 };
@@ -197,7 +155,7 @@ async function callGrok(mode) {
     return { du_doan: 'XỈU', tin_cay: '50%', phan_tich: 'No Grok API Key' };
   }
 
-  const sequence = DATA_STORE[mode].history.slice(-20).map(x => x.result).join(' → ');
+  const sequence = DATA_STORE[mode].history.slice(-15).map(x => x.result).join('->');
 
   try {
     const response = await fetchFn('https://api.x.ai/v1/chat/completions', {
@@ -209,13 +167,10 @@ async function callGrok(mode) {
       body: JSON.stringify({
         model: CONFIG.GROK_MODEL,
         messages: [
-          { role: 'system', content: 'Bạn là chuyên gia phân tích Tài Xỉu. Phân tích streak, tần suất và dự đoán logic. Trả về JSON chính xác.' },
-          {
-            role: 'user',
-            content: `Lịch sử ${mode}: ${sequence}\nDự đoán ván tiếp theo.\nTrả về đúng JSON: {"du_doan":"TÀI","tin_cay":"82%","phan_tich":"Lý do phân tích..."}`
-          }
+          { role: 'system', content: 'Expert Data Analyst. Return JSON only.' },
+          { role: 'user', content: `History ${mode}: ${sequence}. Predict next. Return only JSON: {"du_doan":"TÀI","tin_cay":"89%","phan_tich":"..."}` }
         ],
-        temperature: 0.35
+        temperature: 0.4
       })
     });
 
@@ -224,22 +179,22 @@ async function callGrok(mode) {
     const data = await response.json();
     const content = data?.choices?.[0]?.message?.content || '';
     const match = content.match(/\{[\s\S]*\}/);
+
     if (!match) throw new Error('Invalid AI format');
 
     const parsed = JSON.parse(match[0]);
-
     return {
       du_doan: normalizePrediction(parsed.du_doan),
-      tin_cay: parsed.tin_cay || '60%',
-      phan_tich: parsed.phan_tich || 'AI Analysis'
+      tin_cay: parsed.tin_cay || '50%',
+      phan_tich: parsed.phan_tich || 'AI analysis completed'
     };
   } catch (err) {
-    console.error(`Grok error (${mode}):`, err.message);
-    return { du_doan: 'XỈU', tin_cay: '50%', phan_tich: 'AI Timeout / Error' };
+    console.error(`Grok API error (${mode}):`, err.message);
+    return { du_doan: 'XỈU', tin_cay: '50%', phan_tich: 'AI Error → Fallback' };
   }
 }
 
-// ================== SYNC ENGINE ==================
+// ================== SYNC ENGINE (ANTI-DEADLOCK) ==================
 async function runSync() {
   if (isSyncing) return;
   isSyncing = true;
@@ -249,11 +204,19 @@ async function runSync() {
       const endpoint = CONFIG.ENDPOINTS[key.toUpperCase()];
       const state = DATA_STORE[key];
 
-      if (!endpoint) continue;
+      if (!endpoint || endpoint.includes('PASTE_')) {
+        state.lastError = 'Endpoint not configured';
+        continue;
+      }
 
       try {
         const json = await fetchJsonWithTimeout(endpoint);
         const list = Array.isArray(json) ? json : (json?.list || json?.data || []);
+
+        if (!Array.isArray(list) || list.length === 0) {
+          state.lastSyncAt = new Date().toISOString();
+          continue;
+        }
 
         const incoming = list
           .map(item => ({
@@ -263,39 +226,45 @@ async function runSync() {
           .filter(i => i.session > 0)
           .sort((a, b) => a.session - b.session);
 
-        if (incoming.length === 0) continue;
-
         state.history = mergeHistory(state.history, incoming);
 
-        // Kiểm tra win/lose cho tất cả provider
-        ['railway', 'grok', 'hybrid'].forEach(provider => {
-          const pred = state.lastPrediction[provider];
-          if (pred && !state.processedSessions.has(pred.session)) {
-            const matched = state.history.find(x => x.session === pred.session);
-            if (matched) {
-              const isWin = normalizePrediction(pred.res) === matched.result;
-              state.stats[provider][isWin ? 'win' : 'loss']++;
-              state.stats[provider].total++;
-              state.processedSessions.add(pred.session);
+        // Update stats
+        if (state.lastPrediction && !state.processedSessions.has(state.lastPrediction.session)) {
+          const matched = state.history.find(x => x.session === state.lastPrediction.session);
+          if (matched) {
+            if (normalizePrediction(state.lastPrediction.res) === matched.result) state.stats.win++;
+            else state.stats.loss++;
+            state.stats.total++;
+            state.processedSessions.add(state.lastPrediction.session);
+
+            if (state.processedSessions.size > 100) {
+              state.processedSessions = new Set(Array.from(state.processedSessions).slice(-50));
             }
           }
-        });
-
-        if (state.processedSessions.size > 150) {
-          state.processedSessions = new Set(Array.from(state.processedSessions).slice(-100));
         }
 
         state.lastSyncAt = new Date().toISOString();
         state.lastError = null;
       } catch (err) {
         state.lastError = err.message || String(err);
-        console.error(`Sync error ${key}:`, err.message);
+        state.lastSyncAt = new Date().toISOString();
+        console.error(`Sync fail ${key}:`, err.message);
       }
     }
+  } catch (globalErr) {
+    console.error('Global sync error:', globalErr);
   } finally {
     isSyncing = false;
   }
 }
+
+// ================== GLOBAL ERROR HANDLING ==================
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled Rejection:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+});
 
 // ================== DASHBOARD UI ==================
 app.get('/', (req, res) => {
@@ -308,59 +277,51 @@ app.get('/', (req, res) => {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${escapeHtml(CONFIG.ADMIN)} ${escapeHtml(CONFIG.VERSION)}</title>
   <style>
-    :root {
-      --neon-g: #00ff41;
-      --neon-p: #bc13fe;
-      --bg: #080808;
-      --card: #121212;
-    }
+    :root { --neon-g: #00ff41; --neon-p: #bc13fe; --bg: #080808; --card: #121212; }
+    * { box-sizing: border-box; }
     body {
       margin: 0; min-height: 100vh; background: var(--bg); color: var(--neon-g);
-      font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; padding: 15px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      display: flex; align-items: center; justify-content: center; padding: 20px;
     }
     .container {
-      width: 100%; max-width: 580px; background: var(--card);
-      border: 1px solid rgba(0,255,65,0.9); border-radius: 20px;
-      padding: 25px; box-shadow: 0 0 35px rgba(0,255,65,0.2);
+      width: 100%; max-width: 560px; background: var(--card);
+      border: 1px solid rgba(0,255,65,0.9); border-radius: 20px; padding: 26px;
+      box-shadow: 0 0 30px rgba(0,255,65,0.18); position: relative; text-align: center;
     }
-    h1 { margin: 0 0 8px; font-size: 1.65rem; text-shadow: 0 0 12px var(--neon-g); }
-    .tagline { font-size: 0.8rem; color: #888; letter-spacing: 1.5px; margin-bottom: 25px; }
-    .grid { display: grid; gap: 12px; }
+    .container::before {
+      content: ''; position: absolute; inset: -2px; border-radius: 22px;
+      background: linear-gradient(45deg, var(--neon-g), transparent, var(--neon-p)); opacity: 0.25; z-index: -1;
+    }
+    h1 { margin: 0 0 6px; color: #fff; font-size: 1.5rem; text-shadow: 0 0 10px var(--neon-g); }
+    .tagline { font-size: 0.78rem; letter-spacing: 2px; text-transform: uppercase; color: #666; margin-bottom: 24px; }
+    .grid { display: grid; gap: 14px; }
     .btn {
-      padding: 17px 20px; border-radius: 14px; border: 1px solid var(--neon-g);
-      color: var(--neon-g); text-decoration: none; font-weight: 700;
-      transition: all 0.3s; background: transparent; text-align: left;
+      display: block; padding: 16px 18px; border-radius: 14px; border: 1px solid var(--neon-g);
+      color: var(--neon-g); text-decoration: none; font-weight: 700; transition: 0.25s ease;
     }
-    .btn:hover { transform: translateY(-3px); box-shadow: 0 0 25px rgba(0,255,65,0.4); background: var(--neon-g); color: #000; }
+    .btn:hover { transform: translateY(-2px); box-shadow: 0 0 20px rgba(0,255,65,0.35); background: var(--neon-g); color: #000; }
     .btn.special { border-color: var(--neon-p); color: var(--neon-p); }
-    .btn.special:hover { background: var(--neon-p); color: white; box-shadow: 0 0 25px rgba(188,19,254,0.4); }
-    .panel {
-      margin-top: 20px; padding: 15px; background: rgba(255,255,255,0.03);
-      border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; font-size: 0.93rem;
-    }
-    .footer { margin-top: 20px; text-align: center; color: #555; font-size: 0.75rem; }
+    .btn.special:hover { background: var(--neon-p); color: #fff; box-shadow: 0 0 20px rgba(188,19,254,0.35); }
+    .panel { margin-top: 18px; padding: 14px; border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; color: #bbb; text-align: left; font-size: 0.92rem; background: rgba(255,255,255,0.02); }
+    .footer { margin-top: 18px; color: #444; font-size: 0.72rem; }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>${escapeHtml(CONFIG.ADMIN)} <span style="color:var(--neon-p)">ULTIMATE</span></h1>
-    <div class="tagline">VERSION ${escapeHtml(CONFIG.VERSION)}</div>
-
+    <div class="tagline">System Engine Version ${escapeHtml(CONFIG.VERSION)}</div>
     <div class="grid">
-      <a href="/api/dual-engine?provider=railway" class="btn">1. RAILWAY CORE ENGINE<br><span style="font-weight:400;opacity:0.8">Logic + Streak Analysis</span></a>
-      <a href="/api/dual-engine?provider=grok" class="btn">2. GROK AI MASTER<br><span style="font-weight:400;opacity:0.8">Phân tích bằng Grok AI</span></a>
-      <a href="/api/dual-engine?provider=hybrid" class="btn special">3. HYBRID CONSENSUS (VIP)<br><span style="font-weight:400;opacity:0.8">Kết hợp Code + AI - Tốt nhất</span></a>
+      <a href="/api/dual-engine?provider=railway" class="btn">1. RAILWAY CORE ENGINE</a>
+      <a href="/api/dual-engine?provider=grok" class="btn">2. GROK AI MASTER</a>
+      <a href="/api/dual-engine?provider=hybrid" class="btn special">3. HYBRID CONSENSUS (VIP)</a>
     </div>
-
     <div class="panel">
-      <strong>Health:</strong> <a href="/health" style="color:var(--neon-g)">/health</a><br>
-      <strong>Stats Win/Loss:</strong> <a href="/api/stats" style="color:var(--neon-g)">/api/stats</a><br>
-      <strong>Config:</strong> GROK_API_KEY được quản lý qua Railway Variables.
+      <div><strong>Health:</strong> <a href="/health" style="color:var(--neon-g)">/health</a></div>
+      <div><strong>Stats:</strong> <a href="/api/stats" style="color:var(--neon-g)">/api/stats</a></div>
+      <div>Endpoints & GROK_API_KEY quản lý qua Railway Variables</div>
     </div>
-
-    <div class="footer">
-      ADMIN: ${escapeHtml(CONFIG.ADMIN)} | STATUS: ONLINE | ${new Date().toLocaleDateString('vi-VN')}
-    </div>
+    <div class="footer">ADMIN: ${escapeHtml(CONFIG.ADMIN)} | STATUS: ONLINE</div>
   </div>
 </body>
 </html>
@@ -368,15 +329,7 @@ app.get('/', (req, res) => {
 });
 
 // ================== API ROUTES ==================
-app.get('/health', (req, res) => {
-  res.json({
-    ok: true,
-    time: new Date().toISOString(),
-    syncing: isSyncing,
-    version: CONFIG.VERSION,
-    grok_key_set: !!CONFIG.GROK_API_KEY
-  });
-});
+app.get('/health', (req, res) => res.json({ ok: true, time: new Date().toISOString(), syncing: isSyncing, version: CONFIG.VERSION, grok_key_set: !!CONFIG.GROK_API_KEY }));
 
 app.get('/api/stats', (req, res) => {
   res.json({
@@ -384,16 +337,8 @@ app.get('/api/stats', (req, res) => {
     version: CONFIG.VERSION,
     server_time: new Date().toISOString(),
     data: {
-      nohu: {
-        history_length: DATA_STORE.nohu.history.length,
-        last_sync: DATA_STORE.nohu.lastSyncAt,
-        stats: DATA_STORE.nohu.stats
-      },
-      md5: {
-        history_length: DATA_STORE.md5.history.length,
-        last_sync: DATA_STORE.md5.lastSyncAt,
-        stats: DATA_STORE.md5.stats
-      }
+      nohu: { history_length: DATA_STORE.nohu.history.length, last_sync_at: DATA_STORE.nohu.lastSyncAt, last_error: DATA_STORE.nohu.lastError, stats: DATA_STORE.nohu.stats },
+      md5:  { history_length: DATA_STORE.md5.history.length,  last_sync_at: DATA_STORE.md5.lastSyncAt,  last_error: DATA_STORE.md5.lastError,  stats: DATA_STORE.md5.stats }
     }
   });
 });
@@ -404,61 +349,40 @@ app.get('/api/dual-engine', async (req, res) => {
 
   for (const mode of ['nohu', 'md5']) {
     const state = DATA_STORE[mode];
-    const lastSes = state.history.length ? state.history[state.history.length - 1].session : 0;
-
-    let predictionData;
+    const lastSes = state.history.length > 0 ? state.history[state.history.length - 1].session : 0;
+    let prediction;
 
     if (provider === 'grok') {
       const g = await callGrok(mode);
-      predictionData = {
-        res: g.du_doan,
-        conf: g.tin_cay,
-        log: `Grok AI: ${g.phan_tich}`
-      };
+      prediction = { res: g.du_doan, conf: g.tin_cay, log: `Grok AI: ${g.phan_tich}` };
     } else if (provider === 'hybrid') {
-      const core = Algos.railwayCore(mode);
-      const grok = await callGrok(mode);
-
-      if (normalizePrediction(core.res) === normalizePrediction(grok.du_doan)) {
-        predictionData = {
-          res: core.res,
-          conf: '96%',
-          log: `Hybrid Consensus - Đồng thuận mạnh | ${core.log}`
-        };
+      const a = Algos.railwayCore(mode);
+      const g = await callGrok(mode);
+      if (normalizePrediction(a.res) === normalizePrediction(g.du_doan)) {
+        prediction = { res: a.res, conf: '96%', log: 'Consensus Met (Code & AI Agree)' };
       } else {
-        const coreConf = parseFloat(core.conf) || 0;
-        const grokConf = parseFloat(grok.tin_cay) || 0;
-        predictionData = coreConf >= grokConf ? core : {
-          res: grok.du_doan,
-          conf: grok.tin_cay,
-          log: `AI ưu tiên: ${grok.phan_tich}`
-        };
+        const confA = parseFloat(String(a.conf).replace('%', '')) || 0;
+        const confG = parseFloat(String(g.tin_cay).replace('%', '')) || 0;
+        prediction = confA >= confG ? a : { res: g.du_doan, conf: g.tin_cay, log: 'AI Primary Analysis' };
       }
     } else {
-      predictionData = Algos.railwayCore(mode);
+      prediction = Algos.railwayCore(mode);
     }
 
     const nextSession = lastSes + 1;
-
-    // Lưu dự đoán theo provider
-    state.lastPrediction[provider] = {
-      session: nextSession,
-      res: normalizePrediction(predictionData.res)
-    };
+    state.lastPrediction = { session: nextSession, res: normalizePrediction(prediction.res) };
 
     finalResults[mode.toUpperCase()] = {
       current_session: lastSes,
       next_session: nextSession,
-      predict: normalizePrediction(predictionData.res).toUpperCase(),
-      confidence: predictionData.conf,
-      analysis: predictionData.log,
-      streak: predictionData.streak || 0,
-      balance: predictionData.balance || 'N/A',
+      predict: normalizePrediction(prediction.res).toUpperCase(),
+      confidence: prediction.conf,
+      analysis: prediction.log,
       accuracy: {
-        win: state.stats[provider].win,
-        loss: state.stats[provider].loss,
-        total: state.stats[provider].total,
-        rate: formatRate(state.stats[provider].win, state.stats[provider].total)
+        win: state.stats.win,
+        loss: state.stats.loss,
+        total: state.stats.total,
+        rate: formatRate(state.stats.win, state.stats.total)
       }
     };
   }
@@ -473,8 +397,12 @@ app.get('/api/dual-engine', async (req, res) => {
 });
 
 // ================== START SERVER ==================
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 ${CONFIG.ADMIN} ${CONFIG.VERSION} ONLINE tại port ${PORT}`);
-  runSync();
-  setInterval(runSync, CONFIG.SYNC_MS);
+
+  // Chạy sync sau khi server đã listen (fix 50% crash)
+  setTimeout(() => {
+    runSync();
+    setInterval(runSync, CONFIG.SYNC_MS);
+  }, 1500);
 });
