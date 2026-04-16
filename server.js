@@ -2,13 +2,11 @@
  * =========================================================================================
  * 🚀 TUANX3000 ULTIMATE V10.7 - HYBRID INTELLIGENT ENGINE
  * ADMIN: TUANX3000 | VERSION: 10.7 PRO MAX
- * 
- * TÍNH NĂNG CHÍNH:
+ * * TÍNH NĂNG CHÍNH:
  * 1. Railway     → Chỉ dùng thuật toán cũ (đã nâng cấp mạnh)
  * 2. Grok AI     → Chỉ dùng Grok phân tích
  * 3. Hybrid      → Kết hợp vote giữa thuật toán cũ + Grok (tối ưu nhất)
- * 
- * Win/Loss/Rate luôn lấy từ dữ liệu thực tế (không fake)
+ * * Win/Loss/Rate luôn lấy từ dữ liệu thực tế (không fake)
  * Error handling cực mạnh, log rõ ràng, anti-crash
  * =========================================================================================
  */
@@ -175,9 +173,14 @@ Trả về đúng JSON sau, không thêm bất kỳ chữ nào khác:
         });
 
         const data = await res.json();
+        
+        if (!data.choices || !data.choices[0]) {
+             throw new Error("Grok trả về dữ liệu không hợp lệ");
+        }
+
         let text = data.choices[0].message.content.trim();
 
-        // FIX: Lấy đúng phần JSON
+        // FIX: Lấy đúng phần JSON đề phòng Grok nói thêm
         const start = text.indexOf('{');
         const end = text.lastIndexOf('}');
         if (start !== -1 && end !== -1) {
@@ -200,13 +203,13 @@ Trả về đúng JSON sau, không thêm bất kỳ chữ nào khác:
         return { 
             du_doan: "TÀI", 
             tin_cay: "68%", 
-            phan_tich: "Grok lỗi tạm thời", 
+            phan_tich: "Grok lỗi tạm thời (" + err.message + ")", 
             stats: DATA_STORE[mode].stats 
         };
     }
 }
 
-// ================== SYNC DỮ LIỆU ==================
+// ================== SYNC DỮ LIỆU (TÍNH WIN/LOSS THỰC TẾ) ==================
 async function runSync() {
     for (const key of ['nohu', 'md5']) {
         try {
@@ -222,101 +225,141 @@ async function runSync() {
 
             if (cleanList.length > 0) {
                 const latest = cleanList[cleanList.length - 1];
+                
+                // Cập nhật Win/Loss nếu có phiên mới hoàn thành
                 if (state.lastPrediction && state.lastPrediction.session === latest.session) {
                     if (!state.processedSessions.has(latest.session)) {
-                        if (state.lastPrediction.res === latest.result) state.stats.win++;
-                        else state.stats.loss++;
+                        // So sánh uppercase để tránh lỗi case-sensitive
+                        if (state.lastPrediction.res.toUpperCase() === latest.result.toUpperCase()) {
+                            state.stats.win++;
+                        } else {
+                            state.stats.loss++;
+                        }
                         state.stats.total++;
                         state.processedSessions.add(latest.session);
                     }
                 }
+                // Cập nhật mảng lịch sử mới nhất
                 state.history = cleanList;
             }
         } catch (err) {
-            console.log(`Sync error ${key}`);
+            console.log(`[SYNC ERROR] Lỗi đồng bộ data ${key.toUpperCase()}:`, err.message);
         }
     }
 }
 
-// ================== API CHÍNH (3 CHẾ ĐỘ) ==================
+// ================== API CHÍNH (XỬ LÝ ĐA THUẬT TOÁN) ==================
 app.get('/api/all', async (req, res) => {
-    const mode = req.query.mode || 'nohu';
-    const provider = req.query.provider || 'railway';
+    // 1. Lấy thông số từ User (mặc định là nohu và railway)
+    const mode = (req.query.mode || 'nohu').toLowerCase();
+    const provider = (req.query.provider || 'railway').toLowerCase();
+
+    // Kiểm tra mode hợp lệ
+    if (!DATA_STORE[mode]) {
+        return res.status(400).json({ error: "Mode không hợp lệ. Sử dụng 'nohu' hoặc 'md5'" });
+    }
 
     try {
-        let resultData;
+        const state = DATA_STORE[mode];
+        const lastSes = state.history.length > 0 ? state.history[state.history.length - 1].session : 0;
+        let finalResult;
 
-        if (provider === 'grok') {
-            const grokResult = await callGrokTX(mode);
-            const lastSes = DATA_STORE[mode].history.length > 0 ? DATA_STORE[mode].history[DATA_STORE[mode].history.length - 1].session : 0;
-
-            resultData = {
-                phien_hien_tai: lastSes,
-                phien_tiep: lastSes + 1,
-                du_doan: grokResult.du_doan,
-                tin_cay: grokResult.tin_cay,
-                phan_tich: grokResult.phan_tich,
-                stats: grokResult.stats
-            };
-        } else if (provider === 'hybrid') {
-            const algo = predictNext(mode);
-            const grok = await callGrokTX(mode);
-            
-            // Hybrid: Lấy kết quả có độ tin cậy cao hơn
-            const final = parseFloat(grok.tin_cay) > parseFloat(algo.conf) ? grok : {
-                du_doan: algo.res,
-                tin_cay: algo.conf,
-                phan_tich: algo.log + " + Hybrid vote",
-                stats: DATA_STORE[mode].stats
-            };
-
-            const lastSes = DATA_STORE[mode].history.length > 0 ? DATA_STORE[mode].history[DATA_STORE[mode].history.length - 1].session : 0;
-
-            resultData = {
-                phien_hien_tai: lastSes,
-                phien_tiep: lastSes + 1,
-                du_doan: final.du_doan,
-                tin_cay: final.tin_cay,
-                phan_tich: final.phan_tich,
-                stats: final.stats
-            };
-        } else {
-            // Railway (thuật toán nâng cấp)
-            const s = DATA_STORE[mode];
-            const lastSes = s.history.length > 0 ? s.history[s.history.length - 1].session : 0;
+        // --- CHẾ ĐỘ 1: CHỈ DÙNG THUẬT TOÁN RAILWAY (OLD SCHOOL UPGRADED) ---
+        if (provider === 'railway') {
             const pred = predictNext(mode);
-            s.lastPrediction = { session: lastSes + 1, res: pred.res };
-
-            resultData = {
-                phien_hien_tai: lastSes,
-                phien_tiep: lastSes + 1,
-                du_doan: pred.res,
+            // Lưu lại để tính Win/Loss thực tế ở vòng Sync sau
+            state.lastPrediction = { session: lastSes + 1, res: pred.res };
+            
+            finalResult = {
+                du_doan: pred.res.toUpperCase(),
                 tin_cay: pred.conf,
                 phan_tich: pred.log,
-                stats: {
-                    win: s.stats.win,
-                    loss: s.stats.loss,
-                    rate: s.stats.total > 0 ? ((s.stats.win / s.stats.total) * 100).toFixed(1) + '%' : '0%'
-                }
+            };
+        } 
+
+        // --- CHẾ ĐỘ 2: CHỈ DÙNG GROK AI (REASONING MODE) ---
+        else if (provider === 'grok') {
+            const grokData = await callGrokTX(mode);
+            state.lastPrediction = { session: lastSes + 1, res: grokData.du_doan };
+
+            finalResult = {
+                du_doan: grokData.du_doan.toUpperCase(),
+                tin_cay: grokData.tin_cay,
+                phan_tich: "Grok AI: " + grokData.phan_tich,
             };
         }
 
+        // --- CHẾ ĐỘ 3: HYBRID (KẾT HỢP VOTE THÔNG MINH) ---
+        else if (provider === 'hybrid') {
+            const algo = predictNext(mode);
+            const grok = await callGrokTX(mode);
+            
+            let consensusRes;
+            let consensusConf;
+            let logNote;
+
+            // Logic Hybrid: Nếu đồng thuận -> tỷ lệ nổ cao
+            if (algo.res.toUpperCase() === grok.du_doan.toUpperCase()) {
+                consensusRes = algo.res;
+                consensusConf = "95%"; 
+                logNote = `SỰ ĐỒNG THUẬN CAO (Algo + Grok)`;
+            } else {
+                // Nếu lệch, lấy bên có % tin cậy cao hơn
+                const algoConfNum = parseFloat(algo.conf) || 0;
+                const grokConfNum = parseFloat(grok.tin_cay) || 0;
+                
+                if (algoConfNum >= grokConfNum) {
+                    consensusRes = algo.res;
+                    consensusConf = algo.conf;
+                    logNote = `Algo ưu tiên (Grok lệch: ${grok.du_doan.toUpperCase()})`;
+                } else {
+                    consensusRes = grok.du_doan;
+                    consensusConf = grok.tin_cay;
+                    logNote = `Grok ưu tiên (Algo lệch: ${algo.res.toUpperCase()})`;
+                }
+            }
+
+            state.lastPrediction = { session: lastSes + 1, res: consensusRes };
+            finalResult = {
+                du_doan: consensusRes.toUpperCase(),
+                tin_cay: consensusConf,
+                phan_tich: "HYBRID: " + logNote
+            };
+        } else {
+            return res.status(400).json({ error: "Provider không hợp lệ. Sử dụng 'railway', 'grok' hoặc 'hybrid'" });
+        }
+
+        // ================== TRẢ KẾT QUẢ CHUẨN ==================
         res.json({
             author: CONFIG.ADMIN,
             version: CONFIG.VERSION,
-            server_time: new Date().toLocaleString(),
-            provider: provider,
-            data: { [mode]: resultData }
+            server_time: new Date().toLocaleString('vi-VN'),
+            provider: provider.toUpperCase(),
+            data: {
+                [mode]: {
+                    phien_hien_tai: lastSes,
+                    phien_tiep: lastSes + 1,
+                    du_doan: finalResult.du_doan,
+                    tin_cay: finalResult.tin_cay,
+                    phan_tich: finalResult.phan_tich,
+                    stats: {
+                        win: state.stats.win,
+                        loss: state.stats.loss,
+                        rate: state.stats.total > 0 ? ((state.stats.win / state.stats.total) * 100).toFixed(1) + '%' : '0%'
+                    }
+                }
+            }
         });
 
     } catch (error) {
-        console.error("API Error:", error);
-        res.status(500).json({ error: "Server error" });
+        console.error("Critical API Error:", error);
+        res.status(500).json({ error: "Lỗi xử lý thuật toán", detail: error.message });
     }
 });
 
+// ================== KHỞI ĐỘNG SERVER ==================
 app.listen(PORT, () => {
-    console.log(`🚀 TUANX3000 V10.7 HYBRID ONLINE | Port: ${PORT}`);
-    runSync();
-    setInterval(runSync, CONFIG.SYNC_INTERVAL);
+    console.log(`🚀 ${CONFIG.ADMIN} V10.7 HYBRID ONLINE | Port: ${PORT}`);
+    runSync(); // Chạy Sync ngay khi khởi động
+    setInterval(runSync, CONFIG.SYNC_INTERVAL); // Chạy định kỳ để cập nhật data
 });
