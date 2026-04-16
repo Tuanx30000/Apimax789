@@ -1,33 +1,86 @@
+'use strict';
+
+/**
+ * TUANX3000 ULTIMATE V11.2 - SINGLE FILE FULL
+ * - Dashboard UI
+ * - Dual engine API (Railway Core + Grok AI)
+ * - Sync nền có chống chồng lệnh
+ * - Grok AI fallback an toàn
+ * - Key lấy từ Environment Variables (Railway)
+ *
+ * Yêu cầu: Node.js 18+
+ */
+
 const express = require('express');
 const cors = require('cors');
-const fetch = global.fetch ? global.fetch.bind(global) : require('node-fetch');
 
 const app = express();
-const PORT = process.env.PORT || 8000;
+const PORT = Number(process.env.PORT || 8000);
 
 app.use(cors());
 app.use(express.json());
 
+// ================== CONFIG ==================
 const CONFIG = {
-  ADMIN: process.env.ADMIN_NAME || 'TUANX3000',
-  VERSION: '11.1 CLEAN',
-  SYNC_MS: Number(process.env.SYNC_MS || 3000),
-  GROK_MODEL: process.env.GROK_MODEL || 'grok-4.20-reasoning',
-  FETCH_TIMEOUT_MS: Number(process.env.FETCH_TIMEOUT_MS || 7000),
+  ADMIN: 'TUANX3000',
+  VERSION: '11.2 FULL JS',
+  SYNC_MS: 3000,
+  FETCH_TIMEOUT_MS: 7000,
+  GROK_MODEL: 'grok-4.20-reasoning',   // Model mới nhất 2026
+
+  // === DÁN LINK ENDPOINT VÀO ĐÂY ===
   ENDPOINTS: {
-    NOHU: process.env.NOHU_ENDPOINT || '',
-    MD5: process.env.MD5_ENDPOINT || ''
+    NOHU: 'https://taixiu.maksh3979madfw.com/api/luckydice/GetSoiCau?access_token=05%2F7JlwSPGzFBT3sGaKY2ZcLjROdAOOPB3UwDAmuWFKyfHGWuuM%2BC2zy%2FjjnuznAdeJ1hnJUb8IJnvmUDf44qzL49F2ysXpxi9Qj3ZQZ6ahSqlIQmeUS94Mz3ywCtmnj6ssOz4%2BcY90Z%2FFIaUyLA7aw%2FSOcfQ5jEh4AWpcuvdekhs8XvL9mZS4qPwgCPexrDRWK4gHWx7n2akAHlUFDedm6o6uPDpIEA7z1BXADeLKqizH6WVpDMuD3pEFwdC0zHP2jJtVEQgvGeDGXWLSeSr%2F00etslH1TXwCrs%2BrD4Dj%2B3OmJ3VlTStd%2BirPOtXfmDIBLEr2fUlNRwt%2BRKzRuxt3piAyOlfP1UjrYRX7ekIiTrO%2BYBr3m%2FKDgomuTf2vrP6KqCW%2F2hEdU%3D.14abebf71302f5cce8f3d94ed438ba5c1d31a484d0319b3172db76015a64b4d7',
+    MD5: 'https://taixiumd5.maksh3979madfw.com/api/md5luckydice/GetSoiCau?access_token=05%2F7JlwSPGzFBT3sGaKY2ZcLjROdAOOPB3UwDAmuWFKyfHGWuuM%2BC2zy%2FjjnuznAdeJ1hnJUb8IJnvmUDf44qzL49F2ysXpxi9Qj3ZQZ6ahSqlIQmeUS94Mz3ywCtmnj6ssOz4%2BcY90Z%2FFIaUyLA7aw%2FSOcfQ5jEh4AWpcuvdekhs8XvL9mZS4qPwgCPexrDRWK4gHWx7n2akAHlUFDedm6o6uPDpIEA7z1BXADeLKqizH6WVpDMuD3pEFwdC0zHP2jJtVEQgvGeDGXWLSeSr%2F00etslH1TXwCrs%2BrD4Dj%2B3OmJ3VlTStd%2BirPOtXfmDIBLEr2fUlNRwt%2BRKzRuxt3piAyOlfP1UjrYRX7ekIiTrO%2BYBr3m%2FKDgomuTf2vrP6KqCW%2F2hEdU%3D.14abebf71302f5cce8f3d94ed438ba5c1d31a484d0319b3172db76015a64b4d7'
+  },
+
+  // LẤY TỪ ENVIRONMENT VARIABLES (Railway Variables)
+  GROK_API_KEY: (process.env.GROK_API_KEY || '').trim()
+};
+
+// Warning nếu chưa set key
+if (!CONFIG.GROK_API_KEY) {
+  console.warn('⚠️  GROK_API_KEY chưa được thiết lập. Hãy thêm biến GROK_API_KEY trong Railway Variables.');
+  console.warn('   Hybrid & Grok AI sẽ fallback về kết quả mặc định.');
+}
+
+// ================== FETCH SETUP ==================
+const fetchFn = global.fetch ? global.fetch.bind(global) : null;
+if (!fetchFn) {
+  throw new Error('Node.js 18+ is required because global fetch is missing.');
+}
+
+// ================== DATA STORE ==================
+const DATA_STORE = {
+  nohu: {
+    history: [],
+    lastPrediction: null,
+    stats: { win: 0, loss: 0, total: 0 },
+    processedSessions: new Set(),
+    lastSyncAt: null,
+    lastError: null
+  },
+  md5: {
+    history: [],
+    lastPrediction: null,
+    stats: { win: 0, loss: 0, total: 0 },
+    processedSessions: new Set(),
+    lastSyncAt: null,
+    lastError: null
   }
 };
 
-const GROK_API_KEY = process.env.GROK_API_KEY || '';
-
-const DATA_STORE = {
-  nohu: { history: [], lastPrediction: null, stats: { win: 0, loss: 0, total: 0 }, processedSessions: new Set() },
-  md5: { history: [], lastPrediction: null, stats: { win: 0, loss: 0, total: 0 }, processedSessions: new Set() }
-};
-
 let isSyncing = false;
+
+// ================== UTILS ==================
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 function toNumber(value) {
   const n = Number(value);
@@ -42,7 +95,14 @@ function normalizePrediction(value) {
 }
 
 function standardizeResult(item = {}) {
-  const text = [item.resultTruyenThong, item.result, item.BetSide, item.side, item.betSide, item.name]
+  const text = [
+    item.resultTruyenThong,
+    item.result,
+    item.BetSide,
+    item.side,
+    item.betSide,
+    item.name
+  ]
     .filter(Boolean)
     .join(' ')
     .toUpperCase();
@@ -62,34 +122,46 @@ function mergeHistory(existing, incoming) {
   for (const item of existing) {
     if (item && item.session > 0) map.set(item.session, item);
   }
+
   for (const item of incoming) {
     if (item && item.session > 0) map.set(item.session, item);
   }
 
-  return Array.from(map.values()).sort((a, b) => a.session - b.session).slice(-200);
+  return Array.from(map.values())
+    .sort((a, b) => a.session - b.session)
+    .slice(-200);
+}
+
+function formatRate(win, total) {
+  if (!total) return '0%';
+  return `${((win / total) * 100).toFixed(1)}%`;
 }
 
 async function fetchJsonWithTimeout(url, timeoutMs = CONFIG.FETCH_TIMEOUT_MS) {
-  if (!url) throw new Error('Missing endpoint');
+  if (!url || url.includes('PASTE_')) {
+    throw new Error('Missing endpoint');
+  }
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch(url, { signal: controller.signal });
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
+    const response = await fetchFn(url, { signal: controller.signal });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return await response.json();
   } finally {
     clearTimeout(timer);
   }
 }
 
+// ================== ALGO (Railway Core) ==================
 const Algos = {
-  railwayCore: (mode) => {
+  railwayCore(mode) {
     const h = DATA_STORE[mode].history;
-    if (h.length < 10) return { res: 'N/A', conf: '0%', log: 'Đang nạp dữ liệu sảnh...' };
+
+    if (h.length < 10) {
+      return { res: 'N/A', conf: '0%', log: 'Đang nạp dữ liệu sảnh...' };
+    }
 
     const last6 = h.slice(-6).map(x => (x.result === 'Tài' ? 'T' : 'X')).join('');
     const patterns = {
@@ -107,7 +179,7 @@ const Algos = {
       return {
         res: patterns[last6] === 'T' ? 'Tài' : 'Xỉu',
         conf: '92%',
-        log: 'Pattern Markov detected'
+        log: `Pattern Markov detected: ${last6}`
       };
     }
 
@@ -115,55 +187,75 @@ const Algos = {
     if (countT >= 13) return { res: 'Xỉu', conf: '84%', log: 'High Frequency Reset' };
     if (countT <= 7) return { res: 'Tài', conf: '84%', log: 'Low Frequency Reset' };
 
-    return { res: h[h.length - 1].result === 'Tài' ? 'Xỉu' : 'Tài', conf: '70%', log: 'Counter-Trend Default' };
+    return {
+      res: h[h.length - 1].result === 'Tài' ? 'Xỉu' : 'Tài',
+      conf: '70%',
+      log: 'Counter-Trend Default'
+    };
   }
 };
 
+// ================== GROK AI ==================
 async function callGrok(mode) {
-  if (!GROK_API_KEY) {
-    return { du_doan: 'XỈU', tin_cay: '50%', phan_tich: 'No Key Configured' };
+  if (!CONFIG.GROK_API_KEY) {
+    return {
+      du_doan: 'XỈU',
+      tin_cay: '50%',
+      phan_tich: 'No Grok API Key configured'
+    };
   }
 
-  const sequence = DATA_STORE[mode].history.slice(-15).map(x => x.result).join('->');
+  const sequence = DATA_STORE[mode].history
+    .slice(-15)
+    .map(x => x.result)
+    .join('->');
 
   try {
-    const res = await fetch('https://api.x.ai/v1/chat/completions', {
+    const response = await fetchFn('https://api.x.ai/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${GROK_API_KEY}`
+        Authorization: `Bearer ${CONFIG.GROK_API_KEY}`
       },
       body: JSON.stringify({
         model: CONFIG.GROK_MODEL,
         messages: [
-          { role: 'system', content: 'Expert Data Analyst.' },
+          { role: 'system', content: 'Expert Data Analyst. Return JSON only.' },
           {
             role: 'user',
-            content: `History ${mode}: ${sequence}. Predict next. Return JSON only: {"du_doan":"TÀI","tin_cay":"89%","phan_tich":"..."}`
+            content: `History ${mode}: ${sequence}. Predict next. Return only JSON in this exact format: {"du_doan":"TÀI","tin_cay":"89%","phan_tich":"..."}`
           }
         ],
         temperature: 0.4
       })
     });
 
-    if (!res.ok) throw new Error(`Grok HTTP ${res.status}`);
+    if (!response.ok) throw new Error(`Grok HTTP ${response.status}`);
 
-    const data = await res.json();
+    const data = await response.json();
     const content = data?.choices?.[0]?.message?.content || '';
     const match = content.match(/\{[\s\S]*\}/);
+
     if (!match) throw new Error('Invalid AI response format');
 
     const parsed = JSON.parse(match[0]);
+
     return {
       du_doan: normalizePrediction(parsed.du_doan),
       tin_cay: parsed.tin_cay || '50%',
       phan_tich: parsed.phan_tich || 'AI analysis'
     };
-  } catch (e) {
-    return { du_doan: 'XỈU', tin_cay: '50%', phan_tich: 'AI API Timeout' };
+  } catch (err) {
+    console.error(`Grok API error (${mode}):`, err.message);
+    return {
+      du_doan: 'XỈU',
+      tin_cay: '50%',
+      phan_tich: 'AI API Timeout or Error'
+    };
   }
 }
 
+// ================== SYNC ENGINE ==================
 async function runSync() {
   if (isSyncing) return;
   isSyncing = true;
@@ -171,12 +263,21 @@ async function runSync() {
   try {
     for (const key of ['nohu', 'md5']) {
       const endpoint = CONFIG.ENDPOINTS[key.toUpperCase()];
-      if (!endpoint) continue;
+      const state = DATA_STORE[key];
+
+      if (!endpoint || endpoint.includes('PASTE_')) {
+        state.lastError = 'Endpoint not configured';
+        continue;
+      }
 
       try {
         const json = await fetchJsonWithTimeout(endpoint);
         const list = Array.isArray(json) ? json : (json?.list || json?.data || []);
-        if (!Array.isArray(list) || list.length === 0) continue;
+
+        if (!Array.isArray(list) || list.length === 0) {
+          state.lastSyncAt = new Date().toISOString();
+          continue;
+        }
 
         const incoming = list
           .map(item => ({
@@ -186,16 +287,20 @@ async function runSync() {
           .filter(i => i.session > 0)
           .sort((a, b) => a.session - b.session);
 
-        if (incoming.length === 0) continue;
+        if (incoming.length === 0) {
+          state.lastSyncAt = new Date().toISOString();
+          continue;
+        }
 
-        const state = DATA_STORE[key];
         state.history = mergeHistory(state.history, incoming);
 
         if (state.lastPrediction && !state.processedSessions.has(state.lastPrediction.session)) {
           const matched = state.history.find(x => x.session === state.lastPrediction.session);
+
           if (matched) {
             if (normalizePrediction(state.lastPrediction.res) === matched.result) state.stats.win++;
             else state.stats.loss++;
+
             state.stats.total++;
             state.processedSessions.add(state.lastPrediction.session);
 
@@ -205,7 +310,12 @@ async function runSync() {
             }
           }
         }
+
+        state.lastSyncAt = new Date().toISOString();
+        state.lastError = null;
       } catch (err) {
+        state.lastError = err.message || String(err);
+        state.lastSyncAt = new Date().toISOString();
         console.error(`Sync fail: ${key}`, err.message);
       }
     }
@@ -214,57 +324,171 @@ async function runSync() {
   }
 }
 
+// ================== UI DASHBOARD ==================
 app.get('/', (req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+
   res.send(`
-    <!DOCTYPE html>
-    <html lang="vi">
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>${CONFIG.ADMIN} ${CONFIG.VERSION}</title>
-      <style>
-        :root { --neon-g: #00ff41; --neon-p: #bc13fe; --bg: #080808; }
-        body { background: var(--bg); color: var(--neon-g); font-family: 'Segoe UI', sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; overflow: hidden; }
-        .container { width: 90%; max-width: 480px; background: #121212; border: 1px solid var(--neon-g); border-radius: 20px; padding: 30px; box-shadow: 0 0 30px rgba(0,255,65,0.2); text-align: center; position: relative; }
-        .container::before { content: ''; position: absolute; top: -2px; left: -2px; right: -2px; bottom: -2px; border-radius: 22px; background: linear-gradient(45deg, var(--neon-g), transparent, var(--neon-p)); z-index: -1; opacity: 0.3; }
-        h1 { font-size: 1.6rem; color: #fff; text-shadow: 0 0 10px var(--neon-g); margin-bottom: 5px; }
-        .tagline { font-size: 0.75rem; color: #666; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 30px; }
-        .btn-group { display: flex; flex-direction: column; gap: 15px; }
-        .btn { padding: 18px; border: 1px solid var(--neon-g); color: var(--neon-g); background: transparent; border-radius: 12px; cursor: pointer; text-decoration: none; font-weight: bold; transition: 0.3s; font-size: 0.9rem; }
-        .btn:hover { background: var(--neon-g); color: #000; box-shadow: 0 0 20px var(--neon-g); transform: translateY(-2px); }
-        .btn span { display: block; font-size: 0.7rem; font-weight: normal; opacity: 0.7; margin-top: 4px; }
-        .btn.special { border-color: var(--neon-p); color: var(--neon-p); }
-        .btn.special:hover { background: var(--neon-p); color: #fff; box-shadow: 0 0 20px var(--neon-p); }
-        .footer { margin-top: 30px; font-size: 0.7rem; color: #333; }
-      </style>
-    </head>
-    <body>
-      <div class="container">
-        <h1>${CONFIG.ADMIN} <span style="color:var(--neon-p)">ULTIMATE</span></h1>
-        <div class="tagline">System Engine Version ${CONFIG.VERSION}</div>
-        <div class="btn-group">
-          <a href="/api/dual-engine?provider=railway" class="btn">
-            1. RAILWAY CORE ENGINE
-            <span>Phân tích NoHu & MD5 bằng thuật toán Code</span>
-          </a>
-          <a href="/api/dual-engine?provider=grok" class="btn">
-            2. GROK AI MASTER
-            <span>Phân tích NoHu & MD5 bằng trí tuệ nhân tạo</span>
-          </a>
-          <a href="/api/dual-engine?provider=hybrid" class="btn special">
-            3. HYBRID CONSENSUS (VIP)
-            <span>Kết hợp Code + AI để tối ưu độ nhất quán</span>
-          </a>
-        </div>
-        <div class="footer">ADMIN: ${CONFIG.ADMIN} | STATUS: ONLINE</div>
-      </div>
-    </body>
-    </html>
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeHtml(CONFIG.ADMIN)} ${escapeHtml(CONFIG.VERSION)}</title>
+  <style>
+    :root {
+      --neon-g: #00ff41;
+      --neon-p: #bc13fe;
+      --bg: #080808;
+      --card: #121212;
+      --muted: #777;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--neon-g);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .container {
+      width: 100%;
+      max-width: 560px;
+      background: var(--card);
+      border: 1px solid rgba(0,255,65,0.9);
+      border-radius: 20px;
+      padding: 26px;
+      box-shadow: 0 0 30px rgba(0,255,65,0.18);
+      position: relative;
+      overflow: hidden;
+      text-align: center;
+    }
+    .container::before {
+      content: '';
+      position: absolute;
+      inset: -2px;
+      border-radius: 22px;
+      background: linear-gradient(45deg, var(--neon-g), transparent, var(--neon-p));
+      opacity: 0.25;
+      z-index: -1;
+    }
+    h1 {
+      margin: 0 0 6px;
+      color: #fff;
+      font-size: 1.5rem;
+      text-shadow: 0 0 10px var(--neon-g);
+    }
+    .tagline {
+      font-size: 0.78rem;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: #666;
+      margin-bottom: 24px;
+    }
+    .grid { display: grid; gap: 14px; }
+    .btn {
+      display: block;
+      padding: 16px 18px;
+      border-radius: 14px;
+      border: 1px solid var(--neon-g);
+      color: var(--neon-g);
+      text-decoration: none;
+      font-weight: 700;
+      transition: 0.25s ease;
+      background: transparent;
+    }
+    .btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 0 20px rgba(0,255,65,0.35);
+      background: var(--neon-g);
+      color: #000;
+    }
+    .btn.special {
+      border-color: var(--neon-p);
+      color: var(--neon-p);
+    }
+    .btn.special:hover {
+      background: var(--neon-p);
+      color: #fff;
+      box-shadow: 0 0 20px rgba(188,19,254,0.35);
+    }
+    .panel {
+      margin-top: 18px;
+      padding: 14px;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 14px;
+      color: #bbb;
+      text-align: left;
+      font-size: 0.92rem;
+      line-height: 1.6;
+      background: rgba(255,255,255,0.02);
+    }
+    .footer {
+      margin-top: 18px;
+      color: #444;
+      font-size: 0.72rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>${escapeHtml(CONFIG.ADMIN)} <span style="color:var(--neon-p)">ULTIMATE</span></h1>
+    <div class="tagline">System Engine Version ${escapeHtml(CONFIG.VERSION)}</div>
+
+    <div class="grid">
+      <a href="/api/dual-engine?provider=railway" class="btn">1. RAILWAY CORE ENGINE <span>Phân tích bằng logic code</span></a>
+      <a href="/api/dual-engine?provider=grok" class="btn">2. GROK AI MASTER <span>Phân tích bằng AI</span></a>
+      <a href="/api/dual-engine?provider=hybrid" class="btn special">3. HYBRID CONSENSUS (VIP) <span>Kết hợp Code + AI</span></a>
+    </div>
+
+    <div class="panel">
+      <div><strong>Health:</strong> <a href="/health" style="color:var(--neon-g)">/health</a></div>
+      <div><strong>Stats:</strong> <a href="/api/stats" style="color:var(--neon-g)">/api/stats</a></div>
+      <div><strong>Config:</strong> Endpoints & GROK_API_KEY được quản lý qua Environment Variables.</div>
+    </div>
+
+    <div class="footer">ADMIN: ${escapeHtml(CONFIG.ADMIN)} | STATUS: ONLINE</div>
+  </div>
+</body>
+</html>
   `);
 });
 
+// ================== API ROUTES ==================
 app.get('/health', (req, res) => {
-  res.json({ ok: true, time: new Date().toISOString() });
+  res.json({
+    ok: true,
+    time: new Date().toISOString(),
+    syncing: isSyncing,
+    version: CONFIG.VERSION,
+    grok_key_set: !!CONFIG.GROK_API_KEY
+  });
+});
+
+app.get('/api/stats', (req, res) => {
+  res.json({
+    author: CONFIG.ADMIN,
+    version: CONFIG.VERSION,
+    server_time: new Date().toISOString(),
+    data: {
+      nohu: {
+        history_length: DATA_STORE.nohu.history.length,
+        last_sync_at: DATA_STORE.nohu.lastSyncAt,
+        last_error: DATA_STORE.nohu.lastError,
+        stats: DATA_STORE.nohu.stats
+      },
+      md5: {
+        history_length: DATA_STORE.md5.history.length,
+        last_sync_at: DATA_STORE.md5.lastSyncAt,
+        last_error: DATA_STORE.md5.lastError,
+        stats: DATA_STORE.md5.stats
+      }
+    }
+  });
 });
 
 app.get('/api/dual-engine', async (req, res) => {
@@ -278,23 +502,39 @@ app.get('/api/dual-engine', async (req, res) => {
 
     if (provider === 'grok') {
       const g = await callGrok(mode);
-      prediction = { res: g.du_doan, conf: g.tin_cay, log: `Grok AI: ${g.phan_tich}` };
+      prediction = {
+        res: g.du_doan,
+        conf: g.tin_cay,
+        log: `Grok AI: ${g.phan_tich}`
+      };
     } else if (provider === 'hybrid') {
       const a = Algos.railwayCore(mode);
       const g = await callGrok(mode);
+
       if (normalizePrediction(a.res) === normalizePrediction(g.du_doan)) {
-        prediction = { res: a.res, conf: '96%', log: 'Consensus Met (Code & AI Agree)' };
+        prediction = {
+          res: a.res,
+          conf: '96%',
+          log: 'Consensus Met (Code & AI Agree)'
+        };
       } else {
-        const confA = parseFloat(a.conf) || 0;
-        const confG = parseFloat(g.tin_cay) || 0;
-        prediction = confA >= confG ? a : { res: g.du_doan, conf: g.tin_cay, log: 'AI Primary Analysis' };
+        const confA = parseFloat(String(a.conf).replace('%', '')) || 0;
+        const confG = parseFloat(String(g.tin_cay).replace('%', '')) || 0;
+        prediction = confA >= confG ? a : {
+          res: g.du_doan,
+          conf: g.tin_cay,
+          log: 'AI Primary Analysis'
+        };
       }
     } else {
       prediction = Algos.railwayCore(mode);
     }
 
     const nextSession = lastSes + 1;
-    state.lastPrediction = { session: nextSession, res: normalizePrediction(prediction.res) };
+    state.lastPrediction = {
+      session: nextSession,
+      res: normalizePrediction(prediction.res)
+    };
 
     finalResults[mode.toUpperCase()] = {
       current_session: lastSes,
@@ -305,7 +545,8 @@ app.get('/api/dual-engine', async (req, res) => {
       accuracy: {
         win: state.stats.win,
         loss: state.stats.loss,
-        rate: state.stats.total > 0 ? `${((state.stats.win / state.stats.total) * 100).toFixed(1)}%` : '0%'
+        total: state.stats.total,
+        rate: formatRate(state.stats.win, state.stats.total)
       }
     };
   }
@@ -319,8 +560,9 @@ app.get('/api/dual-engine', async (req, res) => {
   });
 });
 
+// ================== START SERVER ==================
 app.listen(PORT, () => {
-  console.log(`🚀 ${CONFIG.ADMIN} ${CONFIG.VERSION} ONLINE PORT ${PORT}`);
+  console.log(`🚀 ${CONFIG.ADMIN} ${CONFIG.VERSION} ONLINE tại port ${PORT}`);
   runSync();
   setInterval(runSync, CONFIG.SYNC_MS);
 });
