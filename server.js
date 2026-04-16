@@ -1,18 +1,17 @@
 'use strict';
 
 /**
- * TUANX3000 ULTIMATE V11.8 RATE LIMIT FIXED - SINGLE FILE FULL
- * - Fix Grok rate limit (retry + backoff)
- * - Model nhanh & ổn định nhất 2026
- * - UI gốc 100% như bản đầu
- * - Sync chậm hơn tránh overload
+ * TUANX3000 ULTIMATE V11.9 SAFE DEFAULT MODE - SINGLE FILE FULL
+ * - Bản an toàn nhất: Grok fail → tự động fallback về Railway Core
+ * - Hybrid ưu tiên Code nếu Grok lỗi
+ * - UI gốc 100% + mọi chức năng đầy đủ
  */
 
 const express = require('express');
 const cors = require('cors');
 
 const app = express();
-const PORT = Number(process.env.PORT || 6000);
+const PORT = Number(process.env.PORT || 8000);
 
 app.use(cors());
 app.use(express.json());
@@ -20,8 +19,8 @@ app.use(express.json());
 // ================== CONFIG ==================
 const CONFIG = {
   ADMIN: 'TUANX3000',
-  VERSION: '11.8 RATE LIMIT FIXED',
-  SYNC_MS: 5000,                    // Tăng để giảm gọi Grok
+  VERSION: '11.9 SAFE DEFAULT MODE',
+  SYNC_MS: 6000,                    // An toàn, giảm tải
   FETCH_TIMEOUT_MS: 12000,
   GROK_MODEL_PRIMARY: 'grok-4.20-non-reasoning',
   GROK_MODEL_FALLBACK: 'grok-4.20-reasoning',
@@ -35,9 +34,9 @@ const CONFIG = {
 };
 
 if (CONFIG.GROK_API_KEY) {
-  console.log('✅ GROK_API_KEY loaded - Ready (Custom rate limits đang bật)');
+  console.log('✅ GROK_API_KEY loaded - Grok ready (fallback to Core nếu lỗi)');
 } else {
-  console.warn('⚠️ GROK_API_KEY chưa set');
+  console.log('ℹ️  Grok disabled - Chỉ dùng Railway Core (an toàn tuyệt đối)');
 }
 
 // ================== FETCH & DATA STORE ==================
@@ -54,7 +53,7 @@ const DATA_STORE = {
 
 let isSyncing = false;
 
-// ================== UTILS (giữ nguyên) ==================
+// ================== UTILS ==================
 function escapeHtml(value) {
   return String(value || '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -124,67 +123,57 @@ const Algos = {
   }
 };
 
-// ================== GROK AI - RETRY + BACKOFF ==================
-async function callGrok(mode, retries = 2) {
+// ================== GROK AI - SAFE FALLBACK ==================
+async function callGrok(mode) {
   if (!CONFIG.GROK_API_KEY) {
-    return { du_doan: 'XỈU', tin_cay: '50%', phan_tich: 'API Key chưa set' };
+    return { du_doan: 'XỈU', tin_cay: '50%', phan_tich: 'Grok disabled - Fallback to Core' };
   }
 
   const sequence = DATA_STORE[mode].history.slice(-15).map(x => x.result).join(' → ');
   const models = [CONFIG.GROK_MODEL_PRIMARY, CONFIG.GROK_MODEL_FALLBACK];
 
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    for (const model of models) {
-      try {
-        console.log(`[GROK Attempt ${attempt}] Model: ${model} - ${mode.toUpperCase()}`);
+  for (const model of models) {
+    try {
+      console.log(`[GROK] Trying ${model} for ${mode.toUpperCase()}`);
 
-        const response = await fetchFn('https://api.x.ai/v1/chat/completions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${CONFIG.GROK_API_KEY}` },
-          body: JSON.stringify({
-            model: model,
-            messages: [
-              { role: 'system', content: 'Expert analyst. Reply ONLY valid JSON, no markdown.' },
-              { role: 'user', content: `History ${mode.toUpperCase()}: ${sequence}\nPredict next (TÀI/XỈU). Return exactly: {"du_doan":"TÀI","tin_cay":"85%","phan_tich":"short reason"}` }
-            ],
-            temperature: 0.2,
-            max_tokens: 250
-          })
-        });
+      const response = await fetchFn('https://api.x.ai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${CONFIG.GROK_API_KEY}` },
+        body: JSON.stringify({
+          model: model,
+          messages: [
+            { role: 'system', content: 'Expert analyst. Reply ONLY valid JSON.' },
+            { role: 'user', content: `History ${mode.toUpperCase()}: ${sequence}\nPredict next. Return exactly: {"du_doan":"TÀI","tin_cay":"80%","phan_tich":"reason"}` }
+          ],
+          temperature: 0.2,
+          max_tokens: 250
+        })
+      });
 
-        if (!response.ok) {
-          if (response.status === 429) throw new Error('RATE_LIMIT_EXCEEDED');
-          throw new Error(`HTTP ${response.status}`);
-        }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-        const data = await response.json();
-        let content = data?.choices?.[0]?.message?.content || '';
+      const data = await response.json();
+      let content = data?.choices?.[0]?.message?.content || '';
+      content = content.replace(/```json|```/gi, '').trim();
+      const match = content.match(/\{[\s\S]*?\}/);
+      if (!match) throw new Error('No JSON');
 
-        content = content.replace(/```json|```/gi, '').trim();
-        const match = content.match(/\{[\s\S]*?\}/);
-        if (!match) throw new Error('No JSON');
+      const parsed = JSON.parse(match[0]);
 
-        const parsed = JSON.parse(match[0]);
+      console.log(`[GROK SUCCESS] ${mode.toUpperCase()}`);
+      return {
+        du_doan: normalizePrediction(parsed.du_doan),
+        tin_cay: parsed.tin_cay || '80%',
+        phan_tich: parsed.phan_tich || 'Grok AI analysis'
+      };
 
-        console.log(`[GROK SUCCESS] ${mode.toUpperCase()} - ${model}`);
-        return {
-          du_doan: normalizePrediction(parsed.du_doan),
-          tin_cay: parsed.tin_cay || '80%',
-          phan_tich: parsed.phan_tich || 'Grok AI analysis'
-        };
-
-      } catch (err) {
-        console.error(`[GROK FAIL Attempt ${attempt}] ${model} - ${mode}: ${err.message}`);
-        if (attempt < retries) {
-          const wait = attempt * 800;
-          console.log(`[GROK] Chờ ${wait}ms trước retry...`);
-          await new Promise(r => setTimeout(r, wait));
-        }
-      }
+    } catch (err) {
+      console.error(`[GROK FAIL] ${model} - ${mode}: ${err.message}`);
     }
   }
 
-  return { du_doan: 'XỈU', tin_cay: '50%', phan_tich: 'Rate limit hoặc model error (tắt Custom rate limits hoặc tăng giới hạn)' };
+  console.log(`[GROK] Fallback to Railway Core for ${mode}`);
+  return null; // Trả về null để hybrid biết mà fallback
 }
 
 // ================== SYNC ENGINE ==================
@@ -221,7 +210,7 @@ async function runSync() {
         state.lastError = null;
       } catch (err) {
         state.lastError = err.message;
-        console.error(`Sync ${key} lỗi:`, err.message);
+        console.error(`Sync ${key} error:`, err.message);
       }
     }
   } finally {
@@ -229,11 +218,11 @@ async function runSync() {
   }
 }
 
-// Global error
+// ================== GLOBAL ERROR ==================
 process.on('unhandledRejection', (reason) => console.error('Unhandled Rejection:', reason));
 process.on('uncaughtException', (err) => console.error('Uncaught Exception:', err));
 
-// ================== UI DASHBOARD (giữ nguyên như bản gốc) ==================
+// ================== UI DASHBOARD (giữ nguyên 100% như bản gốc) ==================
 app.get('/', (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(`
@@ -272,7 +261,7 @@ app.get('/', (req, res) => {
     <div class="panel">
       <div><strong>Health:</strong> <a href="/health" style="color:var(--neon-g)">/health</a></div>
       <div><strong>Stats:</strong> <a href="/api/stats" style="color:var(--neon-g)">/api/stats</a></div>
-      <div>Rate limit fixed - Tắt Custom rate limits nếu vẫn lỗi</div>
+      <div>Safe Default Mode - Grok fail sẽ tự fallback về Core</div>
     </div>
     <div class="footer">ADMIN: ${escapeHtml(CONFIG.ADMIN)} | STATUS: ONLINE</div>
   </div>
@@ -281,7 +270,7 @@ app.get('/', (req, res) => {
   `);
 });
 
-// ================== API ROUTES (giữ nguyên) ==================
+// ================== API ROUTES ==================
 app.get('/health', (req, res) => res.json({ ok: true, time: new Date().toISOString(), syncing: isSyncing, version: CONFIG.VERSION, grok_key_set: !!CONFIG.GROK_API_KEY }));
 
 app.get('/api/stats', (req, res) => {
@@ -307,16 +296,18 @@ app.get('/api/dual-engine', async (req, res) => {
 
     if (provider === 'grok') {
       const g = await callGrok(mode);
-      prediction = { res: g.du_doan, conf: g.tin_cay, log: `Grok AI: ${g.phan_tich}` };
+      if (g) {
+        prediction = { res: g.du_doan, conf: g.tin_cay, log: `Grok AI: ${g.phan_tich}` };
+      } else {
+        prediction = Algos.railwayCore(mode); // Fallback ngay
+      }
     } else if (provider === 'hybrid') {
       const a = Algos.railwayCore(mode);
       const g = await callGrok(mode);
-      if (normalizePrediction(a.res) === normalizePrediction(g.du_doan)) {
+      if (g && normalizePrediction(a.res) === normalizePrediction(g.du_doan)) {
         prediction = { res: a.res, conf: '96%', log: 'Consensus Met (Code & AI Agree)' };
       } else {
-        const confA = parseFloat(String(a.conf).replace('%', '')) || 0;
-        const confG = parseFloat(String(g.tin_cay).replace('%', '')) || 0;
-        prediction = confA >= confG ? a : { res: g.du_doan, conf: g.tin_cay, log: 'AI Primary Analysis' };
+        prediction = a; // Ưu tiên Core khi Grok fail
       }
     } else {
       prediction = Algos.railwayCore(mode);
@@ -355,5 +346,5 @@ app.listen(PORT, '0.0.0.0', () => {
   setTimeout(() => {
     runSync();
     setInterval(runSync, CONFIG.SYNC_MS);
-  }, 3000);
+  }, 2000);
 });
