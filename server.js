@@ -1,13 +1,13 @@
 /**
  * =========================================================================================
- * 🚀 TUANX3000 ULTIMATE V10.7 - HYBRID INTELLIGENT ENGINE (FINAL VERSION)
- * ADMIN: TUANX3000 | VERSION: 10.7 PRO MAX
- * NỀN TẢNG: RAILWAY.APP | ENGINE: HYBRID (ALGO + AI)
- * * TÍNH NĂNG ĐỘC QUYỀN:
- * 1. Railway Engine: Thuật toán xác suất nâng cao (Markov + Frequency).
- * 2. Grok AI Engine: Phân tích sâu bằng trí tuệ nhân tạo Grok-4.20.
- * 3. Hybrid Mode: Cơ chế đồng thuận (Consensus) - Tự động so khớp kết quả.
- * 4. Real-time Statistics: Tính tỉ lệ Win/Loss thực tế từ dữ liệu nhà cái.
+ * 🚀 TUANX3000 ULTIMATE V11.0 - THE SUPREME DUAL-ENGINE
+ * ADMIN: TUANX3000 | VERSION: 11.0 FINAL PRO MAX
+ * NỀN TẢNG: RAILWAY.APP | STYLE: CYBER-TECH NEON
+ * * TÍNH NĂNG TỔNG HỢP:
+ * 1. Dual-Sourcing: Quét đồng thời dữ liệu NoHu và MD5.
+ * 2. Multi-Algorithm: Railway Core (Xác suất), Grok Master (AI), Hybrid (Hợp nhất).
+ * 3. Auto-Sync & Clean: Tự động dọn dẹp bộ nhớ và đồng bộ phiên theo thời gian thực.
+ * 4. Win/Loss Tracking: Thống kê tỉ lệ thắng thực tế dựa trên kết quả nhà cái.
  * =========================================================================================
  */
 
@@ -20,11 +20,11 @@ const PORT = process.env.PORT || 8000;
 app.use(cors());
 app.use(express.json());
 
-// ================== CẤU HÌNH HỆ THỐNG ==================
+// ================== ⚙️ CẤU HÌNH HỆ THỐNG ==================
 const CONFIG = {
     ADMIN: "TUANX3000",
-    VERSION: "10.7 PRO MAX - HYBRID",
-    SYNC_INTERVAL: 3000, // Quét dữ liệu mỗi 3 giây
+    VERSION: "11.0 SUPREME",
+    SYNC_MS: 3000,
     GROK_MODEL: "grok-4.20-reasoning",
     ENDPOINTS: {
         NOHU: 'https://taixiu.maksh3979madfw.com/api/luckydice/GetSoiCau?access_token=05%2F7JlwSPGzFBT3sGaKY2ZcLjROdAOOPB3UwDAmuWFKyfHGWuuM%2BC2zy%2FjjnuznAdeJ1hnJUb8IJnvmUDf44qzL49F2ysXpxi9Qj3ZQZ6ahSqlIQmeUS94Mz3ywCtmnj6ssOz4%2BcY90Z%2FFIaUyLA7aw%2FSOcfQ5jEh4AWpcuvdekhs8XvL9mZS4qPwgCPexrDRWK4gHWx7n2akAHlUFDedm6o6uPDpIEA7z1BXADeLKqizH6WVpDMuD3pEFwdC0zHP2jJtVEQgvGeDGXWLSeSr%2F00etslH1TXwCrs%2BrD4Dj%2B3OmJ3VlTStd%2BirPOtXfmDIBLEr2fUlNRwt%2BRKzRuxt3piAyOlfP1UjrYRX7ekIiTrO%2BYBr3m%2FKDgomuTf2vrP6KqCW%2F2hEdU%3D.14abebf71302f5cce8f3d94ed438ba5c1d31a484d0319b3172db76015a64b4d7',
@@ -34,13 +34,13 @@ const CONFIG = {
 
 const GROK_API_KEY = process.env.GROK_API_KEY;
 
-// DATA STORE (Lưu trạng thái bộ nhớ đệm)
+// KHO DỮ LIỆU ĐỘC LẬP
 let DATA_STORE = {
     nohu: { history: [], lastPrediction: null, stats: { win: 0, loss: 0, total: 0 }, processedSessions: new Set() },
     md5: { history: [], lastPrediction: null, stats: { win: 0, loss: 0, total: 0 }, processedSessions: new Set() }
 };
 
-// ================== UTILS (Xử lý dữ liệu thô) ==================
+// ================== 🛠️ CORE LOGIC & UTILS ==================
 const Utils = {
     standardize: (item) => {
         let raw = String(item.resultTruyenThong || item.result || item.BetSide || '').toUpperCase();
@@ -49,64 +49,49 @@ const Utils = {
     }
 };
 
-// ================== THUẬT TOÁN ENGINE RAILWAY ==================
 const Algos = {
-    markovChain: (h) => {
+    railwayCore: (mode) => {
+        const h = DATA_STORE[mode].history;
+        if (h.length < 10) return { res: 'N/A', conf: '0%', log: 'Đang nạp dữ liệu sảnh...' };
+
+        // Chuỗi Markov 6 phiên
         const last6 = h.map(x => x.result === 'Tài' ? 'T' : 'X').slice(-6).join('');
-        const patterns = {
-            'TTTTTT': 'X', 'XXXXXX': 'T', 'TTTTTX': 'X', 'XXXXXT': 'T',
-            'TXTXTX': 'T', 'XTXTXT': 'X', 'TTXXTT': 'X', 'XXTTXX': 'T'
+        const patterns = { 
+            'TTTTTT': 'X', 'XXXXXX': 'T', 'TXTXTX': 'T', 'XTXTXT': 'X', 
+            'TTXXTT': 'X', 'XXTTXX': 'T', 'TTTXXX': 'T', 'XXXT T T': 'X' 
         };
-        return patterns[last6] || null;
-    },
-    frequency: (h) => {
-        const last20 = h.slice(-20);
-        const countT = last20.filter(x => x.result === 'Tài').length;
-        if (countT >= 13) return 'X';
-        if (countT <= 7) return 'T';
-        return null;
-    },
-    predict: (type) => {
-        const history = DATA_STORE[type].history;
-        if (history.length < 10) return { res: 'N/A', conf: '0%', log: 'Đang thu thập dữ liệu...' };
 
-        const lastResult = history[history.length - 1].result;
-        const pMarkov = Algos.markovChain(history);
-        const pFreq = Algos.frequency(history);
+        if (patterns[last6]) return { res: patterns[last6] === 'T' ? 'Tài' : 'Xỉu', conf: '92%', log: 'Pattern Markov detected' };
 
-        if (pMarkov) return { res: pMarkov === 'T' ? 'Tài' : 'Xỉu', conf: '89%', log: 'Xác nhận Markov Chain' };
-        if (pFreq) return { res: pFreq === 'T' ? 'Tài' : 'Xỉu', conf: '84%', log: 'Cân bằng xác suất 20 phiên' };
-        
-        return { res: lastResult === 'Tài' ? 'Xỉu' : 'Tài', conf: '70%', log: 'Đánh cầu đảo mặc định' };
+        // Cân bằng tần suất 20 phiên
+        const countT = h.slice(-20).filter(x => x.result === 'Tài').length;
+        if (countT >= 13) return { res: 'Xỉu', conf: '84%', log: 'High Frequency Reset' };
+        if (countT <= 7) return { res: 'Tài', conf: '84%', log: 'Low Frequency Reset' };
+
+        return { res: h[h.length - 1].result === 'Tài' ? 'Xỉu' : 'Tài', conf: '70%', log: 'Counter-Trend Default' };
     }
 };
 
-// ================== GROK AI INTEGRATION ==================
+// ================== 🤖 AI ENGINE (GROK) ==================
 async function callGrok(mode) {
-    if (!GROK_API_KEY) return { du_doan: "TÀI", tin_cay: "60%", phan_tich: "Thiếu GROK_API_KEY trong Railway Variables" };
-
-    const historyText = DATA_STORE[mode].history.slice(-15).map(x => x.result).join(' -> ');
-    const prompt = `Bạn là TX Master Grok. Dữ liệu gần nhất: ${historyText}. Dự đoán phiên tiếp theo là TÀI hay XỈU? Trả về duy nhất JSON: {"du_doan":"TÀI","tin_cay":"85%","phan_tich":"..."}`;
-
+    if (!GROK_API_KEY) return { du_doan: "TÀI", tin_cay: "50%", phan_tich: "No Key Configured" };
+    const sequence = DATA_STORE[mode].history.slice(-15).map(x => x.result).join('->');
     try {
         const res = await fetch("https://api.x.ai/v1/chat/completions", {
             method: "POST",
             headers: { "Content-Type": "application/json", "Authorization": `Bearer ${GROK_API_KEY}` },
             body: JSON.stringify({
                 model: CONFIG.GROK_MODEL,
-                messages: [{ role: "system", content: "Chuyên gia soi cầu TX Max789." }, { role: "user", content: prompt }],
-                temperature: 0.6
+                messages: [{ role: "system", content: "Expert Data Analyst." }, { role: "user", content: `History ${mode}: ${sequence}. Predict next. Return JSON only: {"du_doan":"TÀI","tin_cay":"89%","phan_tich":"..."}` }],
+                temperature: 0.4
             })
         });
         const data = await res.json();
-        const content = data.choices[0].message.content.trim();
-        return JSON.parse(content.match(/\{.*\}/s)[0]);
-    } catch (e) {
-        return { du_doan: "TÀI", tin_cay: "55%", phan_tich: "Grok AI lỗi kết nối" };
-    }
+        return JSON.parse(data.choices[0].message.content.match(/\{.*\}/s)[0]);
+    } catch (e) { return { du_doan: "XỈU", tin_cay: "50%", phan_tich: "AI API Timeout" }; }
 }
 
-// ================== REAL-TIME SYNC (Đồng bộ Win/Loss) ==================
+// ================== 🔄 REAL-TIME SYNC ENGINE ==================
 async function runSync() {
     for (const key of ['nohu', 'md5']) {
         try {
@@ -118,10 +103,11 @@ async function runSync() {
             const cleanList = list.map(item => ({
                 session: Number(item.id || item.SessionId || 0),
                 result: Utils.standardize(item)
-            })).filter(h => h.session > 0).sort((a, b) => a.session - b.session);
+            })).filter(i => i.session > 0).sort((a, b) => a.session - b.session);
 
             if (cleanList.length > 0) {
                 const latest = cleanList[cleanList.length - 1];
+                // Kiểm soát Win/Loss
                 if (state.lastPrediction && state.lastPrediction.session === latest.session && !state.processedSessions.has(latest.session)) {
                     if (state.lastPrediction.res.toUpperCase() === latest.result.toUpperCase()) state.stats.win++;
                     else state.stats.loss++;
@@ -129,12 +115,14 @@ async function runSync() {
                     state.processedSessions.add(latest.session);
                 }
                 state.history = cleanList;
+                // Giới hạn bộ nhớ processed
+                if (state.processedSessions.size > 100) state.processedSessions.clear();
             }
-        } catch (err) { console.error(`Sync error: ${key}`); }
+        } catch (err) { console.error(`Sync fail: ${key}`); }
     }
 }
 
-// ================== GIAO DIỆN DASHBOARD (Sửa lỗi Cannot GET /) ==================
+// ================== 🖥️ CYBER-TECH DASHBOARD ==================
 app.get('/', (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -142,115 +130,103 @@ app.get('/', (req, res) => {
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>${CONFIG.ADMIN} - V10.7 HYBRID</title>
+            <title>${CONFIG.ADMIN} V11.0</title>
             <style>
-                body { background: #080808; color: #00ff41; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
-                .card { background: #121212; border: 1px solid #00ff41; padding: 30px; border-radius: 20px; box-shadow: 0 0 25px rgba(0,255,65,0.15); width: 90%; max-width: 450px; text-align: center; }
-                h1 { font-size: 1.5rem; color: #fff; text-shadow: 0 0 10px #00ff41; margin: 0; letter-spacing: 2px; }
-                .badge { font-size: 0.7rem; background: #00ff41; color: #000; padding: 2px 8px; border-radius: 10px; font-weight: bold; vertical-align: middle; }
-                .menu { margin-top: 30px; }
-                .btn { display: block; width: 100%; padding: 16px; margin: 15px 0; border: 1px solid #00ff41; background: transparent; color: #00ff41; border-radius: 12px; cursor: pointer; text-decoration: none; font-weight: bold; transition: 0.3s; box-sizing: border-box; }
-                .btn:hover { background: #00ff41; color: #000; box-shadow: 0 0 20px #00ff41; transform: scale(1.02); }
-                .btn.hybrid { border-color: #ff00ff; color: #ff00ff; }
-                .btn.hybrid:hover { background: #ff00ff; color: #fff; box-shadow: 0 0 20px #ff00ff; }
-                .desc { font-size: 0.75rem; color: #666; display: block; margin-top: 5px; font-weight: normal; }
-                .footer { margin-top: 30px; font-size: 0.7rem; color: #333; text-transform: uppercase; letter-spacing: 2px; }
+                :root { --neon-g: #00ff41; --neon-p: #bc13fe; --bg: #080808; }
+                body { background: var(--bg); color: var(--neon-g); font-family: 'Segoe UI', sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; overflow: hidden; }
+                .container { width: 90%; max-width: 480px; background: #121212; border: 1px solid var(--neon-g); border-radius: 20px; padding: 30px; box-shadow: 0 0 30px rgba(0,255,65,0.2); text-align: center; position: relative; }
+                .container::before { content: ''; position: absolute; top: -2px; left: -2px; right: -2px; bottom: -2px; border-radius: 22px; background: linear-gradient(45deg, var(--neon-g), transparent, var(--neon-p)); z-index: -1; opacity: 0.3; }
+                h1 { font-size: 1.6rem; color: #fff; text-shadow: 0 0 10px var(--neon-g); margin-bottom: 5px; }
+                .tagline { font-size: 0.75rem; color: #666; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 30px; }
+                .btn-group { display: flex; flex-direction: column; gap: 15px; }
+                .btn { padding: 18px; border: 1px solid var(--neon-g); color: var(--neon-g); background: transparent; border-radius: 12px; cursor: pointer; text-decoration: none; font-weight: bold; transition: 0.3s; font-size: 0.9rem; }
+                .btn:hover { background: var(--neon-g); color: #000; box-shadow: 0 0 20px var(--neon-g); transform: translateY(-2px); }
+                .btn span { display: block; font-size: 0.7rem; font-weight: normal; opacity: 0.7; margin-top: 4px; }
+                .btn.special { border-color: var(--neon-p); color: var(--neon-p); }
+                .btn.special:hover { background: var(--neon-p); color: #fff; box-shadow: 0 0 20px var(--neon-p); }
+                .footer { margin-top: 30px; font-size: 0.7rem; color: #333; }
             </style>
         </head>
         <body>
-            <div class="card">
-                <h1>${CONFIG.ADMIN} <span class="badge">PRO MAX</span></h1>
-                <p style="color: #0ff; font-size: 0.8rem; margin-top: 5px;">HỆ THỐNG PHÂN TÍCH HYBRID V10.7</p>
+            <div class="container">
+                <h1>${CONFIG.ADMIN} <span style="color:var(--neon-p)">ULTIMATE</span></h1>
+                <div class="tagline">System Engine Version 11.0</div>
                 
-                <div class="menu">
-                    <a href="/api/all?provider=railway" class="btn">
-                        1. RAILWAY ENGINE
-                        <span class="desc">Chạy thuật toán xác suất & Markov (Tốc độ ⚡)</span>
+                <div class="btn-group">
+                    <a href="/api/dual-engine?provider=railway" class="btn">
+                        1. RAILWAY CORE ENGINE
+                        <span>Phân tích NoHu & MD5 bằng thuật toán Code</span>
                     </a>
-
-                    <a href="/api/all?provider=grok" class="btn">
-                        2. GROK AI ENGINE
-                        <span class="desc">Phân tích bằng trí tuệ nhân tạo Grok-4.20</span>
+                    <a href="/api/dual-engine?provider=grok" class="btn">
+                        2. GROK AI MASTER
+                        <span>Phân tích NoHu & MD5 bằng trí tuệ nhân tạo</span>
                     </a>
-
-                    <a href="/api/all?provider=hybrid" class="btn hybrid">
-                        3. HYBRID MODE (VIP)
-                        <span class="desc">Kết hợp AI + Code (Độ chính xác cao nhất)</span>
+                    <a href="/api/dual-engine?provider=hybrid" class="btn special">
+                        3. HYBRID CONSENSUS (VIP)
+                        <span>Kết hợp Code + AI để tối ưu độ chính xác</span>
                     </a>
                 </div>
+                <div class="footer">ADMIN: ANHTUANMMO | STATUS: ONLINE</div>
             </div>
-            <div class="footer">ADMIN: ${CONFIG.ADMIN} | ENGINE: HYBRID INTELLIGENT</div>
         </body>
         </html>
     `);
 });
 
-// ================== API XỬ LÝ CHÍNH ==================
-app.get('/api/all', async (req, res) => {
-    const mode = (req.query.mode || 'nohu').toLowerCase();
+// ================== ⚡ API DUAL-ENGINE (TRẢ VỀ CẢ 2 LOẠI) ==================
+app.get('/api/dual-engine', async (req, res) => {
     const provider = (req.query.provider || 'railway').toLowerCase();
-    
-    if (!DATA_STORE[mode]) return res.status(400).json({ error: "Mode không hợp lệ. Hãy dùng nohu hoặc md5." });
+    const finalResults = {};
 
-    const state = DATA_STORE[mode];
-    const lastSes = state.history.length > 0 ? state.history[state.history.length - 1].session : 0;
-    let final;
+    for (const mode of ['nohu', 'md5']) {
+        const state = DATA_STORE[mode];
+        const lastSes = state.history.length > 0 ? state.history[state.history.length - 1].session : 0;
+        let prediction;
 
-    try {
         if (provider === 'grok') {
             const g = await callGrok(mode);
-            final = { res: g.du_doan, conf: g.tin_cay, log: "Grok AI: " + g.phan_tich };
+            prediction = { res: g.du_doan, conf: g.tin_cay, log: "Grok AI: " + g.phan_tich };
         } else if (provider === 'hybrid') {
-            const a = Algos.predict(mode);
+            const a = Algos.railwayCore(mode);
             const g = await callGrok(mode);
-            
             if (a.res.toUpperCase() === g.du_doan.toUpperCase()) {
-                final = { res: a.res, conf: "95%", log: "ĐỒNG THUẬN CAO (Code + AI)" };
+                prediction = { res: a.res, conf: "96%", log: "Consensus Met (Code & AI Agree)" };
             } else {
-                const aConf = parseFloat(a.conf);
-                const gConf = parseFloat(g.tin_cay);
-                final = aConf >= gConf ? a : { res: g.du_doan, conf: g.tin_cay, log: "AI ưu tiên phân tích" };
+                prediction = parseFloat(a.conf) > parseFloat(g.tin_cay) ? a : { res: g.du_doan, conf: g.tin_cay, log: "AI Primary Analysis" };
             }
         } else {
-            final = Algos.predict(mode);
+            prediction = Algos.railwayCore(mode);
         }
 
-        // Ghi lại dự đoán để đối chiếu phiên sau
-        state.lastPrediction = { session: lastSes + 1, res: final.res };
+        // Lưu vết dự đoán
+        state.lastPrediction = { session: lastSes + 1, res: prediction.res };
 
-        res.json({
-            author: CONFIG.ADMIN,
-            version: CONFIG.VERSION,
-            provider: provider.toUpperCase(),
-            server_time: new Date().toLocaleString('vi-VN'),
-            data: {
-                [mode]: {
-                    phien_hien_tai: lastSes,
-                    phien_tiep_theo: lastSes + 1,
-                    du_doan: final.res.toUpperCase(),
-                    tin_cay: final.conf,
-                    phan_tich: final.log,
-                    stats: {
-                        win: state.stats.win,
-                        loss: state.stats.loss,
-                        rate: state.stats.total > 0 ? ((state.stats.win / state.stats.total) * 100).toFixed(1) + '%' : '0%'
-                    }
-                }
+        finalResults[mode.toUpperCase()] = {
+            current_session: lastSes,
+            next_session: lastSes + 1,
+            predict: prediction.res.toUpperCase(),
+            confidence: prediction.conf,
+            analysis: prediction.log,
+            accuracy: {
+                win: state.stats.win,
+                loss: state.stats.loss,
+                rate: state.stats.total > 0 ? ((state.stats.win / state.stats.total) * 100).toFixed(1) + '%' : '0%'
             }
-        });
-    } catch (e) {
-        res.status(500).json({ error: "Lỗi thực thi thuật toán", message: e.message });
+        };
     }
+
+    res.json({
+        author: CONFIG.ADMIN,
+        version: CONFIG.VERSION,
+        provider: provider.toUpperCase(),
+        server_time: new Date().toLocaleString('vi-VN'),
+        results: finalResults
+    });
 });
 
-// ================== KHỞI CHẠY HỆ THỐNG ==================
+// ================== 🚀 KHỞI CHẠY ==================
 app.listen(PORT, () => {
-    console.log(`
-    =============================================
-    🚀 TUANX3000 V10.7 HYBRID IS ONLINE
-    PORT: ${PORT} | ADMIN: ${CONFIG.ADMIN}
-    =============================================
-    `);
+    console.log(`🚀 ${CONFIG.ADMIN} V11.0 ONLINE PORT ${PORT}`);
     runSync();
-    setInterval(runSync, CONFIG.SYNC_INTERVAL);
+    setInterval(runSync, CONFIG.SYNC_MS);
 });
