@@ -1,8 +1,10 @@
 /**
  * =========================================================================================
- * 🚀 TUANX3000 ULTIMATE V10.6 - GROK TX MASTER + FULL ALGORITHM
+ * 🚀 TUANX3000 ULTIMATE V10.6 - 2 CHẾ ĐỘ: RAILWAY + GROK TX MASTER
  * ADMIN: TUANX3000 | VERSION: 10.6 PRO MAX
- * ĐẦY ĐỦ THUẬT TOÁN + GROK + WIN/LOSE CHÍNH XÁC + ANTI-CRASH
+ * CHẾ ĐỘ 1: Thuật toán cũ (Railway) 
+ * CHẾ ĐỘ 2: Grok AI (provider=grok)
+ * WIN/LOSE/RATE LUÔN CHÍNH XÁC TỪ DỮ LIỆU THỰC TẾ
  * =========================================================================================
  */
 
@@ -15,10 +17,10 @@ const PORT = process.env.PORT || 8000;
 app.use(cors());
 app.use(express.json());
 
-// ================== CẤU HÌNH ==================
+// ================== CẤU HÌNH HỆ THỐNG ==================
 const CONFIG = {
     ADMIN: "TUANX3000",
-    VERSION: "10.6 PRO MAX + GROK",
+    VERSION: "10.6 PRO MAX - 2 MODE",
     SYNC_INTERVAL: 3000,
     GROK_MODEL: "grok-4.20-reasoning",
     ENDPOINTS: {
@@ -27,7 +29,7 @@ const CONFIG = {
     }
 };
 
-// KEY GROK TỪ RAILWAY VARIABLES (an toàn, không hardcode)
+// LẤY KEY TỪ RAILWAY VARIABLES
 const GROK_API_KEY = process.env.GROK_API_KEY;
 
 // ================== DATA STORE ==================
@@ -45,7 +47,7 @@ const Utils = {
     }
 };
 
-// ================== THUẬT TOÁN (ĐẦY ĐỦ) ==================
+// ================== THUẬT TOÁN (ĐẦY ĐỦ NHƯ CODE CŨ) ==================
 const Algos = {
     markovChain: (h) => {
         const last4 = h.map(x => x.result === 'Tài' ? 'T' : 'X').slice(-4).join('');
@@ -66,14 +68,11 @@ const Algos = {
     }
 };
 
-// ================== DỰ ĐOÁN TỔNG HỢP ==================
 function predictNext(type) {
     const history = DATA_STORE[type].history;
     if (history.length < 10) return { res: 'N/A', conf: '0%', log: 'Đang nạp dữ liệu' };
 
     const lastResult = history[history.length - 1].result;
-    
-    // Kiểm tra bệt
     let streak = 0;
     for (let i = history.length - 1; i >= 0; i--) {
         if (history[i].result === lastResult) streak++;
@@ -84,7 +83,6 @@ function predictNext(type) {
         return { res: lastResult, conf: '88%', log: `THEO BỆT ${streak + 1} TAY` };
     }
 
-    // Vote từ thuật toán
     let votes = { T: 0, X: 0 };
     const pMarkov = Algos.markovChain(history);
     const pFreq = Algos.frequency(history);
@@ -103,19 +101,18 @@ function predictNext(type) {
 // ================== GROK TX MASTER ==================
 async function callGrokTX(mode) {
     if (!GROK_API_KEY) {
-        console.log("❌ GROK_API_KEY chưa được thiết lập trên Railway");
         return { du_doan: "TÀI", tin_cay: "65%", phan_tich: "Không có key Grok", stats: DATA_STORE[mode].stats };
     }
 
     const prompt = `Bạn là TX Master Grok - chuyên gia Tài Xỉu Max789.
 Mode hiện tại: ${mode.toUpperCase()}.
-Dựa trên xu hướng và dữ liệu lịch sử, dự đoán ván tiếp theo.
-Trả về CHÍNH XÁC JSON sau, không thêm bất kỳ chữ nào khác:
+Dự đoán ván tiếp theo là TÀI hay XỈU.
+Trả về đúng JSON sau:
 
 {
   "du_doan": "TÀI" hoặc "XỈU",
-  "tin_cay": "85%",
-  "phan_tich": "Lý do ngắn gọn, rõ ràng",
+  "tin_cay": "82%",
+  "phan_tich": "Lý do ngắn gọn",
   "stats": {
     "win": ${DATA_STORE[mode].stats.win},
     "loss": ${DATA_STORE[mode].stats.loss},
@@ -134,7 +131,7 @@ Trả về CHÍNH XÁC JSON sau, không thêm bất kỳ chữ nào khác:
                 model: CONFIG.GROK_MODEL,
                 messages: [{ role: "user", content: prompt }],
                 temperature: 0.65,
-                max_tokens: 800
+                max_tokens: 700
             })
         });
 
@@ -142,7 +139,6 @@ Trả về CHÍNH XÁC JSON sau, không thêm bất kỳ chữ nào khác:
         const text = data.choices[0].message.content.trim();
         const result = JSON.parse(text);
 
-        // Đảm bảo win/lose/rate luôn lấy từ dữ liệu thực tế
         result.stats = result.stats || {};
         result.stats.win = DATA_STORE[mode].stats.win;
         result.stats.loss = DATA_STORE[mode].stats.loss;
@@ -153,12 +149,7 @@ Trả về CHÍNH XÁC JSON sau, không thêm bất kỳ chữ nào khác:
         return result;
     } catch (err) {
         console.error("Grok Error:", err.message);
-        return {
-            du_doan: "TÀI",
-            tin_cay: "68%",
-            phan_tich: "Grok tạm lỗi → dùng thuật toán cũ",
-            stats: DATA_STORE[mode].stats
-        };
+        return { du_doan: "TÀI", tin_cay: "68%", phan_tich: "Grok lỗi tạm thời", stats: DATA_STORE[mode].stats };
     }
 }
 
@@ -178,14 +169,10 @@ async function runSync() {
 
             if (cleanList.length > 0) {
                 const latest = cleanList[cleanList.length - 1];
-                
                 if (state.lastPrediction && state.lastPrediction.session === latest.session) {
                     if (!state.processedSessions.has(latest.session)) {
-                        if (state.lastPrediction.res === latest.result) {
-                            state.stats.win++;
-                        } else {
-                            state.stats.loss++;
-                        }
+                        if (state.lastPrediction.res === latest.result) state.stats.win++;
+                        else state.stats.loss++;
                         state.stats.total++;
                         state.processedSessions.add(latest.session);
                     }
@@ -193,80 +180,71 @@ async function runSync() {
                 state.history = cleanList;
             }
         } catch (err) {
-            console.log(`Sync error ${key}:`, err.message);
+            console.log(`Sync error ${key}`);
         }
     }
 }
 
-// ================== API CHÍNH ==================
+// ================== API ROUTES ==================
+app.get('/', (req, res) => {
+    res.send(`<h1 style="text-align:center; padding:50px; color:#00ffcc;">🚀 TUANX3000 V10.6<br>API is running!</h1>`);
+});
+
 app.get('/api/all', async (req, res) => {
     const mode = req.query.mode || 'nohu';
     const provider = req.query.provider || 'railway';
 
     try {
+        let resultData;
+
         if (provider === 'grok') {
             const grokResult = await callGrokTX(mode);
             const lastSes = DATA_STORE[mode].history.length > 0 ? DATA_STORE[mode].history[DATA_STORE[mode].history.length - 1].session : 0;
 
-            res.json({
-                author: CONFIG.ADMIN,
-                version: CONFIG.VERSION,
-                server_time: new Date().toLocaleString(),
-                provider: "grok",
-                data: {
-                    [mode]: {
-                        phien_hien_tai: lastSes,
-                        phien_tiep: lastSes + 1,
-                        du_doan: grokResult.du_doan,
-                        tin_cay: grokResult.tin_cay,
-                        phan_tich: grokResult.phan_tich,
-                        stats: grokResult.stats
-                    }
-                }
-            });
-        } else {
-            // Railway cũ
-            const buildResponse = (type) => {
-                const s = DATA_STORE[type];
-                const lastSes = s.history.length > 0 ? s.history[s.history.length - 1].session : 0;
-                const pred = predictNext(type);
-                s.lastPrediction = { session: lastSes + 1, res: pred.res };
-
-                return {
-                    phien_hien_tai: lastSes,
-                    phien_tiep: lastSes + 1,
-                    du_doan: pred.res,
-                    tin_cay: pred.conf,
-                    phan_tich: pred.log,
-                    stats: {
-                        win: s.stats.win,
-                        loss: s.stats.loss,
-                        rate: s.stats.total > 0 ? ((s.stats.win / s.stats.total) * 100).toFixed(1) + '%' : '0%'
-                    }
-                };
+            resultData = {
+                phien_hien_tai: lastSes,
+                phien_tiep: lastSes + 1,
+                du_doan: grokResult.du_doan,
+                tin_cay: grokResult.tin_cay,
+                phan_tich: grokResult.phan_tich,
+                stats: grokResult.stats
             };
+        } else {
+            const s = DATA_STORE[mode];
+            const lastSes = s.history.length > 0 ? s.history[s.history.length - 1].session : 0;
+            const pred = predictNext(mode);
+            s.lastPrediction = { session: lastSes + 1, res: pred.res };
 
-            res.json({
-                author: CONFIG.ADMIN,
-                version: CONFIG.VERSION,
-                server_time: new Date().toLocaleString(),
-                provider: "railway",
-                data: {
-                    nohu: buildResponse('nohu'),
-                    md5: buildResponse('md5')
+            resultData = {
+                phien_hien_tai: lastSes,
+                phien_tiep: lastSes + 1,
+                du_doan: pred.res,
+                tin_cay: pred.conf,
+                phan_tich: pred.log,
+                stats: {
+                    win: s.stats.win,
+                    loss: s.stats.loss,
+                    rate: s.stats.total > 0 ? ((s.stats.win / s.stats.total) * 100).toFixed(1) + '%' : '0%'
                 }
-            });
+            };
         }
+
+        res.json({
+            author: CONFIG.ADMIN,
+            version: CONFIG.VERSION,
+            server_time: new Date().toLocaleString(),
+            provider: provider,
+            data: { [mode]: resultData }
+        });
+
     } catch (error) {
         console.error("API Error:", error);
         res.status(500).json({ error: "Server error" });
     }
 });
 
-// ================== KHỞI ĐỘNG ==================
 app.listen(PORT, () => {
-    console.log(`🚀 TUANX3000 V10.6 + GROK ONLINE | Port: ${PORT}`);
-    console.log(`Grok Key Status: ${GROK_API_KEY ? '✅ ĐÃ CÓ' : '❌ CHƯA CÓ - VUI LÒNG THÊM VÀO RAILWAY VARIABLES'}`);
+    console.log(`🚀 TUANX3000 V10.6 ONLINE | Port: ${PORT}`);
     runSync();
     setInterval(runSync, CONFIG.SYNC_INTERVAL);
 });
