@@ -1,15 +1,10 @@
 {
-  "name": "ai-prediction-server",
-  "version": "1.0.0",
+  "name": "tuanx3000-hybrid-v13",
+  "version": "13.0.0",
   "main": "server.js",
-  "scripts": {
-    "start": "node server.js"
-  },
   "dependencies": {
-    "cors": "^2.8.5",
-    "crypto": "^1.0.1",
     "express": "^4.18.2",
-    "node-fetch": "^2.6.7",
-    "seedrandom": "^3.0.5"
-  }
+    "axios": "^1.6.0"
+  },
+  "scripts": { "start": "node server.js" }
 }
