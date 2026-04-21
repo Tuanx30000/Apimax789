@@ -118,65 +118,104 @@ async function runSync() {
 // ================== 🖥️ DASHBOARD HTML ==================
 app.get('/', (req, res) => {
     res.send(`
-    <html>
+        <!DOCTYPE html>
+        <html lang="vi">
         <head>
-            <title>TUANX3000 V11.1</title>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>${CONFIG.ADMIN} V11.1</title>
             <style>
-                body { background: #0a0a0a; color: #00ff00; font-family: 'Courier New', monospace; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-                .box { border: 2px solid #00ff00; padding: 20px; box-shadow: 0 0 15px #00ff00; background: rgba(0,255,0,0.05); border-radius: 10px; width: 80%; max-width: 500px; text-align: center; }
-                h1 { text-shadow: 0 0 10px #00ff00; margin-bottom: 10px; }
-                .status { color: #ff00ff; font-weight: bold; }
-                .footer { margin-top: 20px; font-size: 0.8em; opacity: 0.6; }
+                :root { --neon-g: #00ff41; --neon-p: #bc13fe; --bg: #050505; }
+                body { background: var(--bg); color: var(--neon-g); font-family: 'Consolas', monospace; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+                .container { width: 95%; max-width: 500px; background: #000; border: 1px solid var(--neon-g); border-radius: 15px; padding: 20px; box-shadow: 0 0 20px rgba(0,255,65,0.15); text-align: center; }
+                h1 { font-size: 1.5rem; color: #fff; text-shadow: 0 0 10px var(--neon-g); margin: 0; }
+                .status-bar { font-size: 0.7rem; color: #666; margin-bottom: 20px; text-transform: uppercase; border-bottom: 1px solid #222; padding-bottom: 10px; }
+                
+                .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+                .card { background: #111; border: 1px solid #333; padding: 15px; border-radius: 10px; position: relative; overflow: hidden; }
+                .card h3 { font-size: 0.8rem; margin: 0 0 10px 0; color: #aaa; }
+                .res-val { font-size: 1.8rem; font-weight: 900; margin: 5px 0; }
+                .tai { color: #ff0000; text-shadow: 0 0 10px #ff0000; }
+                .xiu { color: #0088ff; text-shadow: 0 0 10px #0088ff; }
+                .conf { font-size: 0.7rem; color: var(--neon-p); }
+
+                .btn-group { display: grid; grid-template-columns: 1fr; gap: 10px; }
+                .btn { padding: 12px; border: 1px solid var(--neon-g); color: var(--neon-g); background: transparent; border-radius: 8px; cursor: pointer; text-decoration: none; font-size: 0.8rem; transition: 0.3s; }
+                .btn:hover { background: var(--neon-g); color: #000; box-shadow: 0 0 15px var(--neon-g); }
+                .btn.active { background: var(--neon-g); color: #000; font-weight: bold; }
+                
+                .log-box { margin-top: 15px; padding: 10px; background: #0a0a0a; border: 1px dashed #444; font-size: 0.65rem; color: #888; text-align: left; height: 40px; overflow-y: auto; }
             </style>
         </head>
         <body>
-            <div class="box">
-                <h1>🚀 TUANX3000 V11.1</h1>
-                <p>SERVER STATUS: <span class="status">ONLINE (PORT ${PORT})</span></p>
-                <p>AI ENGINE: <span style="color: cyan;">GROK-2-1212</span></p>
-                <hr style="border-color: #00ff00;">
-                <p>API Endpoint: <code>/api/dual-engine?provider=hybrid</code></p>
+            <div class="container">
+                <h1>${CONFIG.ADMIN} <span style="color:var(--neon-p)">SUPREME</span></h1>
+                <div class="status-bar">System Status: <span id="time">Loading...</span></div>
+                
+                <div class="grid">
+                    <div class="card">
+                        <h3>SẢNH NỔ HŨ</h3>
+                        <div id="nohu-res" class="res-val">--</div>
+                        <div id="nohu-conf" class="conf">Confidence: 0%</div>
+                    </div>
+                    <div class="card">
+                        <h3>SẢNH MD5</h3>
+                        <div id="md5-res" class="res-val">--</div>
+                        <div id="md5-conf" class="conf">Confidence: 0%</div>
+                    </div>
+                </div>
+
+                <div class="btn-group">
+                    <button onclick="fetchData('hybrid', this)" class="btn active">HYBRID ENGINE (CODE + AI)</button>
+                    <button onclick="fetchData('grok', this)" class="btn">GROK AI ONLY</button>
+                    <button onclick="fetchData('railway', this)" class="btn">RAILWAY CORE (FAST)</button>
+                </div>
+
+                <div id="log" class="log-box">>> Ready to scan pattern...</div>
+                <div style="font-size: 0.6rem; margin-top: 15px; color: #333;">AUTO-REFRESH EVERY 15S</div>
             </div>
-            <div class="footer">ADMIN: TUANX3000 | RAILWAY DEPLOYED</div>
+
+            <script>
+                async function fetchData(provider, btn) {
+                    // Update UI
+                    document.querySelectorAll('.btn').forEach(b => b.classList.remove('active'));
+                    if(btn) btn.classList.add('active');
+                    
+                    document.getElementById('log').innerText = ">> Accessing " + provider.toUpperCase() + "...";
+                    
+                    try {
+                        const res = await fetch('/api/dual-engine?provider=' + provider);
+                        const json = await res.json();
+                        
+                        // Update NoHu
+                        const nohu = json.results.NOHU;
+                        const nohuEl = document.getElementById('nohu-res');
+                        nohuEl.innerText = nohu.predict;
+                        nohuEl.className = 'res-val ' + (nohu.predict === 'TÀI' ? 'tai' : 'xiu');
+                        document.getElementById('nohu-conf').innerText = "Confidence: " + nohu.confidence + " | " + nohu.accuracy.rate;
+
+                        // Update MD5
+                        const md5 = json.results.MD5;
+                        const md5El = document.getElementById('md5-res');
+                        md5El.innerText = md5.predict;
+                        md5El.className = 'res-val ' + (md5.predict === 'TÀI' ? 'tai' : 'xiu');
+                        document.getElementById('md5-conf').innerText = "Confidence: " + md5.confidence + " | " + md5.accuracy.rate;
+
+                        document.getElementById('log').innerText = ">> Session: " + nohu.next_session + " | Analysis: " + nohu.analysis;
+                        document.getElementById('time').innerText = json.server_time;
+
+                    } catch (e) {
+                        document.getElementById('log').innerText = ">> Error: Sync failed!";
+                    }
+                }
+
+                // Auto refresh
+                fetchData('hybrid');
+                setInterval(() => fetchData('hybrid'), 15000);
+            </script>
         </body>
-    </html>
+        </html>
     `);
-});
-
-// ================== ⚡ API DUAL-ENGINE ==================
-app.get('/api/dual-engine', async (req, res) => {
-    const provider = (req.query.provider || 'hybrid').toLowerCase();
-    const finalResults = {};
-
-    for (const mode of ['nohu', 'md5']) {
-        const state = DATA_STORE[mode];
-        const lastSes = state.history.length > 0 ? state.history[state.history.length - 1].session : 0;
-        let prediction;
-
-        if (provider === 'grok') {
-            const g = await callGrok(mode);
-            prediction = { res: g.du_doan, conf: g.tin_cay, log: g.phan_tich };
-        } else {
-            const a = Algos.railwayCore(mode);
-            const g = await callGrok(mode);
-            if (a.res.toUpperCase() === g.du_doan.toUpperCase()) {
-                prediction = { res: a.res, conf: "96%", log: "✅ Consensus" };
-            } else {
-                prediction = parseFloat(a.conf) > parseFloat(g.tin_cay) ? a : { res: g.du_doan, conf: g.tin_cay, log: "🤖 AI Focus" };
-            }
-        }
-
-        state.lastPrediction = { session: lastSes + 1, res: prediction.res };
-        finalResults[mode.toUpperCase()] = {
-            session: lastSes + 1,
-            predict: prediction.res.toUpperCase(),
-            confidence: prediction.conf,
-            analysis: prediction.log,
-            win_rate: state.stats.total > 0 ? ((state.stats.win / state.stats.total) * 100).toFixed(1) + '%' : '0%'
-        };
-    }
-
-    res.json({ status: "SUCCESS", data: finalResults });
 });
 
 app.listen(PORT, () => {
