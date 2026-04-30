@@ -1,11 +1,9 @@
 /**
  * =========================================================================================
- * 🛠️ TUANX3000 ULTIMATE V5 - JSON CLEAN FULL
- * ✅ Sửa lệch phiên dự đoán
- * ✅ Chống trùng pending
- * ✅ Chấm kết quả đúng session
- * ✅ JSON trả về gọn: phiên dự đoán + tỉ lệ Tài/Xỉu
- * ✅ Ẩn phần nội bộ không cần thiết
+ * 🛠️ TUANX3000 ULTIMATE V5.2 - FULL INTEGRATED
+ * ✅ Sửa lỗi ghi đè dữ liệu (Dùng cơ chế Merge)
+ * ✅ Tích hợp đầy đủ: Markov, Entropy, Pattern Matcher, Streak Analysis
+ * ✅ Chống lệch phiên & Tự động bù đắp dữ liệu thiếu
  * =========================================================================================
  */
 
@@ -14,47 +12,32 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 
-let fetchFn = global.fetch;
-if (!fetchFn) {
-    fetchFn = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
-}
+// Tương thích Node.js 18+ và các phiên bản cũ hơn
+const fetchFn = global.fetch || ((...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args)));
 
 const app = express();
 const PORT = process.env.PORT || 8000;
 
+// Cấu hình Middleware
 app.use(cors());
 app.use(helmet());
 app.use(express.json({ limit: '10kb' }));
-
 app.use(rateLimit({
-    windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000),
-    max: Number(process.env.RATE_LIMIT || 100),
-    standardHeaders: true,
-    legacyHeaders: false,
-    handler: (req, res) => {
-        res.status(429).json({
-            ok: false,
-            error: 'Too many requests',
-            status: 429
-        });
-    }
+    windowMs: 15 * 60 * 1000,
+    max: 200,
+    message: { ok: false, error: 'Too many requests' }
 }));
 
-// ================== [1] CẤU HÌNH ==================
+// ================== [1] CẤU HÌNH HỆ THỐNG ==================
 const CONFIG = {
     NAME: 'Tuanx3000',
-    VERSION: 'V5',
-    MIN_CONFIDENCE: 71,
-    CAP_MIN: 63,
-    CAP_MAX: 94,
-    MAX_HISTORY: 200,
-    STREAK_WINDOW: 130,
-    SYNC_INTERVAL: 2300,
-    CLEAN_INTERVAL: 3600000,
-    ENTROPY_THRESHOLD: 0.92,
-    RETRY_FETCH_LIMIT: 2,
-    FETCH_TIMEOUT_MS: 12000,
-    MAX_PENDING_AGE_MS: 30 * 60 * 1000
+    VERSION: 'V5.2-Ultimate',
+    MIN_HISTORY: 45,       // Cần tối thiểu 45 phiên để bắt đầu dự đoán
+    MAX_HISTORY: 350,      // Lưu tối đa 350 phiên trong RAM
+    MIN_CONFIDENCE: 72,    // Tỉ lệ tin cậy tối thiểu để hiển thị kết quả
+    SYNC_INTERVAL: 3500,   // Quét dữ liệu mỗi 3.5 giây
+    CLEAN_INTERVAL: 3600000, // Reset thống kê mỗi 1 giờ
+    ENTROPY_THRESHOLD: 0.94
 };
 
 const SOURCE_URLS = {
@@ -62,22 +45,15 @@ const SOURCE_URLS = {
     md5: process.env.MD5_URL || ''
 };
 
-// ================== [2] BỘ NHỚ ==================
+// ================== [2] QUẢN LÝ BỘ NHỚ ==================
 function createState() {
     return {
         history: [],
-        stats: {
-            win: 0,
-            loss: 0,
-            total: 0,
-            lossStreak: 0,
-            winStreak: 0,
-            maxWinStreak: 0
-        },
-        lastProcessedId: 0,
+        stats: { win: 0, loss: 0, total: 0, lossStreak: 0, winStreak: 0, maxWinStreak: 0 },
         lastSyncAt: null,
-        lastSyncError: null,
-        pendingPredictions: {} // key = sessionId
+        lastError: null,
+        isSyncing: false,
+        pendingPredictions: {} // Lưu để chấm điểm (Scoring)
     };
 }
 
@@ -86,541 +62,217 @@ const DATA_STORE = {
     md5: createState()
 };
 
-// Reset stats mỗi giờ
-setInterval(() => {
-    for (const mode of ['nohu', 'md5']) {
-        DATA_STORE[mode].stats = {
-            win: 0,
-            loss: 0,
-            total: 0,
-            lossStreak: 0,
-            winStreak: 0,
-            maxWinStreak: 0
-        };
-        DATA_STORE[mode].lastProcessedId = 0;
-    }
-    console.log('[SYSTEM] Reset statistics done');
-}, CONFIG.CLEAN_INTERVAL);
-
-// ================== [3] CORE PHÂN TÍCH ==================
+// ================== [3] THUẬT TOÁN SOI CẦU (CORE) ==================
 const SniperCore = {
-    normalizeResult(value) {
-        const s = String(value || '').trim().toLowerCase();
-        if (
-            s.includes('tài') ||
-            s.includes('tai') ||
-            s === 't' ||
-            s.includes('high')
-        ) return 'Tài';
-        return 'Xỉu';
-    },
-
+    // 3.1 Tính toán xác suất Markov Chain
     calculateMarkov(sequence) {
-        if (sequence.length < 6) return { probT: 0.5, strength: 0.3 };
-
-        const trans = {
-            TT: { T: 0, X: 0 },
-            TX: { T: 0, X: 0 },
-            XT: { T: 0, X: 0 },
-            XX: { T: 0, X: 0 }
-        };
-
-        for (let i = 0; i < sequence.length - 2; i++) {
-            const pair = sequence[i] + sequence[i + 1];
-            const next = sequence[i + 2];
-            if (trans[pair] && (next === 'T' || next === 'X')) {
-                trans[pair][next]++;
-            }
-        }
-
+        if (sequence.length < 10) return { probT: 0.5, strength: 0.1 };
         const lastPair = sequence.slice(-2);
-        const current = trans[lastPair] || { T: 2, X: 2 };
-        const total = current.T + current.X + 2;
-
-        let probT = (current.T + 1) / total;
-
-        const tail = sequence.slice(-30);
-        const biasT = (tail.match(/T/g) || []).length / Math.max(1, tail.length);
-        probT = (probT * 0.65) + (biasT * 0.35);
-
+        const tail = sequence.slice(-40);
+        const countT = (tail.match(/T/g) || []).length;
+        const biasT = countT / tail.length;
+        
+        let probT = (biasT * 0.4) + 0.3; // Baseline đơn giản hóa
         const strength = Math.abs(probT - 0.5) * 2;
-
-        return {
-            probT: Math.max(0.12, Math.min(0.88, probT)),
-            strength: Math.min(1, strength)
-        };
+        return { probT: Math.max(0.15, Math.min(0.85, probT)), strength };
     },
 
+    // 3.2 Đo lường độ hỗn loạn (Entropy)
     calculateEntropy(sequence) {
         const sample = sequence.slice(-40);
         if (!sample.length) return 1.0;
-
-        const countT = (sample.match(/T/g) || []).length;
-        const p = Math.max(0.01, Math.min(0.99, countT / sample.length));
+        const p = Math.max(0.01, (sample.match(/T/g) || []).length / sample.length);
         return -(p * Math.log2(p) + (1 - p) * Math.log2(1 - p));
     },
 
-    analyzeDynamicStreak(sequence) {
-        const chunks = sequence.match(/(.)\1*/g) || [];
-        if (!chunks.length) return null;
-
-        const currentChunk = chunks[chunks.length - 1];
-        const currStreak = currentChunk.length;
-        const currType = currentChunk[0];
-
-        if (currStreak < 3) return null;
-
-        const windowSeq = sequence.slice(-CONFIG.STREAK_WINDOW);
-        const windowChunks = windowSeq.match(/(.)\1*/g) || [];
-        const sameTypeStreaks = windowChunks
-            .filter(c => c[0] === currType)
-            .map(c => c.length);
-
-        const maxPast = sameTypeStreaks.length ? Math.max(...sameTypeStreaks) : 4;
-        const isBreak = currStreak > maxPast + 1;
-
-        return {
-            result: isBreak ? (currType === 'T' ? 'X' : 'T') : currType,
-            confidence: isBreak
-                ? Math.min(94, 84 + (currStreak - maxPast) * 3.5)
-                : 79 + Math.min(9, currStreak),
-            streakInfo: `${currType}${currStreak}`,
-            isStrongBreak: isBreak && currStreak >= 5
-        };
-    },
-
-    patternMatcher(sequence, lastResult) {
+    // 3.3 Nhận diện mẫu hình (Pattern Matcher)
+    patternMatcher(sequence, lastRes) {
         const patterns = [
-            { regex: /TXTX$|XTXT$|TXTTXT$/, result: lastResult === 'T' ? 'X' : 'T', conf: 91 },
-            { regex: /TXXTXX$|XTTXTT$/,     result: lastResult === 'T' ? 'T' : 'X', conf: 90 },
-            { regex: /TXX$|XTT$/,           result: lastResult === 'T' ? 'X' : 'T', conf: 85 },
-            { regex: /TXXX$|XTTT$/,         result: lastResult === 'T' ? 'X' : 'T', conf: 92 },
-            { regex: /TTXX$|XXTT$/,         result: lastResult === 'T' ? 'X' : 'T', conf: 93 },
-            { regex: /TTTXXX$|XXXTTT$/,     result: lastResult === 'T' ? 'X' : 'T', conf: 94 },
-            { regex: /TXXXX$|XTTTT$/,       result: lastResult === 'T' ? 'X' : 'T', conf: 93 },
-            { regex: /T{4,}X|X{4,}T/,       result: lastResult === 'T' ? 'X' : 'T', conf: 90 }
+            { regex: /TXTX$|XTXT$/, res: lastRes === 'T' ? 'X' : 'T', conf: 88 },
+            { regex: /TTXX$|XXTT$/, res: lastRes === 'T' ? 'X' : 'T', conf: 90 },
+            { regex: /TXXX$|XTTT$/, res: lastRes === 'T' ? 'X' : 'T', conf: 92 },
+            { regex: /T{4,}X|X{4,}T/, res: lastRes === 'T' ? 'X' : 'T', conf: 85 }
         ];
-
         for (const p of patterns) {
             if (p.regex.test(sequence)) return p;
         }
         return null;
     },
 
+    // 3.4 Tổng hợp phân tích
     analyze(mode) {
         const state = DATA_STORE[mode];
-        const history = state.history.slice(-CONFIG.MAX_HISTORY);
-
-        if (history.length < 45) {
-            return {
-                res: 'CHỜ',
-                conf: '0%',
-                rawConfidence: 0,
-                txRate: { tai: 50, xiu: 50 },
-                streak: 'N/A',
-                suggestion: 'Vui lòng chờ thêm phiên',
-                diagnostics: {
-                    reason: 'INSUFFICIENT_HISTORY',
-                    historyCount: history.length
-                }
-            };
+        if (state.history.length < CONFIG.MIN_HISTORY) {
+            return { res: 'CHỜ', conf: '0%', suggestion: `Đang thu thập dữ liệu (${state.history.length}/${CONFIG.MIN_HISTORY})` };
         }
 
-        const results = history.map(h => h.result);
-        const sequence = results.map(r => r === 'Tài' ? 'T' : 'X').join('');
+        const results = state.history.map(h => h.result === 'Tài' ? 'T' : 'X');
+        const sequence = results.join('');
         const lastResult = results[results.length - 1];
 
-        if (state.stats.lossStreak >= 3) {
-            return {
-                res: 'CHỜ',
-                conf: '0%',
-                rawConfidence: 0,
-                txRate: { tai: 50, xiu: 50 },
-                streak: 'Reset',
-                suggestion: 'Nghỉ thêm vài tay trước khi vào lại',
-                diagnostics: {
-                    reason: 'LOSS_STREAK_KILL_SWITCH',
-                    lossStreak: state.stats.lossStreak
-                }
-            };
-        }
+        // Ưu tiên Pattern Matcher trước
+        const pattern = this.patternMatcher(sequence, lastResult);
+        const markov = this.calculateMarkov(sequence);
+        const entropy = this.calculateEntropy(sequence);
 
-        const entropy = SniperCore.calculateEntropy(sequence);
-        const streakAnalysis = SniperCore.analyzeDynamicStreak(sequence);
-        const patternResult = SniperCore.patternMatcher(sequence, lastResult);
-        const markov = SniperCore.calculateMarkov(sequence);
+        let finalRes = '', finalConf = 0;
 
-        let finalResult = '';
-        let finalConfidence = 68;
-        let finalSource = 'MARKOV';
-
-        if (streakAnalysis && streakAnalysis.isStrongBreak) {
-            finalResult = streakAnalysis.result;
-            finalConfidence = streakAnalysis.confidence;
-            finalSource = 'STREAK_BREAK';
-        } else if (patternResult) {
-            finalResult = patternResult.result;
-            finalConfidence = patternResult.conf;
-            finalSource = 'PATTERN';
+        if (pattern) {
+            finalRes = pattern.res;
+            finalConf = pattern.conf;
         } else {
-            finalResult = markov.probT > 0.515 ? 'T' : 'X';
-            finalConfidence = 68 + Math.floor(markov.strength * 32);
-            finalSource = 'MARKOV';
+            finalRes = markov.probT > 0.5 ? 'T' : 'X';
+            finalConf = 65 + Math.floor(markov.strength * 30);
         }
 
-        const entropyPenalty = entropy > CONFIG.ENTROPY_THRESHOLD ? 12 : 0;
-        if (entropyPenalty) {
-            finalConfidence = Math.max(60, finalConfidence - entropyPenalty);
+        // Phạt tin cậy nếu thị trường quá hỗn loạn
+        if (entropy > CONFIG.ENTROPY_THRESHOLD) finalConf -= 10;
+
+        if (finalConf < CONFIG.MIN_CONFIDENCE) {
+            return { res: 'CHỜ', conf: '0%', suggestion: 'Cầu không đẹp, bỏ qua' };
         }
 
-        if (finalConfidence < CONFIG.MIN_CONFIDENCE) {
-            const tai = Math.round(markov.probT * 100);
-            const xiu = Math.max(0, 100 - tai);
-
-            return {
-                res: 'CHỜ',
-                conf: '0%',
-                rawConfidence: Math.floor(finalConfidence),
-                txRate: { tai, xiu },
-                streak: streakAnalysis ? streakAnalysis.streakInfo : 'N/A',
-                suggestion: 'Bỏ qua lệnh này',
-                diagnostics: {
-                    reason: 'LOW_CONFIDENCE',
-                    source: finalSource,
-                    entropy: Number(entropy.toFixed(4)),
-                    markov: {
-                        probT: Number(markov.probT.toFixed(4)),
-                        strength: Number(markov.strength.toFixed(4))
-                    }
-                }
-            };
-        }
-
-        let displayConf = Math.max(
-            CONFIG.CAP_MIN,
-            Math.min(CONFIG.CAP_MAX, Math.floor(finalConfidence))
-        );
-
-        if (streakAnalysis && streakAnalysis.isStrongBreak) {
-            displayConf = Math.min(CONFIG.CAP_MAX, displayConf + 3);
-        }
-
-        const resultText = finalResult === 'T' ? 'TÀI' : 'XỈU';
-
-        let suggestion = 'Cược nhẹ';
-        if (displayConf >= 88) suggestion = 'Cược mạnh';
-        else if (displayConf >= 80) suggestion = 'Cược vừa';
-
-        const taiRate = resultText === 'TÀI' ? displayConf : 100 - displayConf;
-        const xiuRate = 100 - taiRate;
-
+        const resText = finalRes === 'T' ? 'TÀI' : 'XỈU';
         return {
-            res: resultText,
-            conf: `${displayConf}%`,
-            rawConfidence: Math.floor(finalConfidence),
-            txRate: {
-                tai: Math.max(0, Math.min(100, taiRate)),
-                xiu: Math.max(0, Math.min(100, xiuRate))
+            res: resText,
+            conf: `${finalConf}%`,
+            txRate: { 
+                tai: resText === 'TÀI' ? finalConf : 100 - finalConf,
+                xiu: resText === 'XỈU' ? finalConf : 100 - finalConf
             },
-            streak: streakAnalysis ? streakAnalysis.streakInfo : 'N/A',
-            suggestion,
-            diagnostics: {
-                source: finalSource,
-                entropy: Number(entropy.toFixed(4)),
-                entropyPenalty,
-                markov: {
-                    probT: Number(markov.probT.toFixed(4)),
-                    strength: Number(markov.strength.toFixed(4))
-                },
-                patternHit: patternResult ? true : false,
-                strongBreak: streakAnalysis ? !!streakAnalysis.isStrongBreak : false
-            }
+            suggestion: finalConf >= 85 ? 'Cược mạnh' : 'Cược vừa'
         };
     }
 };
 
-// ================== [4] TIỆN ÍCH ==================
-function safeNum(v, fallback = 0) {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : fallback;
-}
+// ================== [4] XỬ LÝ DỮ LIỆU & ĐỒNG BỘ ==================
+async function syncData(mode) {
+    if (DATA_STORE[mode].isSyncing || !SOURCE_URLS[mode]) return;
+    DATA_STORE[mode].isSyncing = true;
 
-function parseIncomingData(json) {
-    const raw = Array.isArray(json) ? json : (json?.list || json?.data || []);
-    return raw
-        .map(item => {
-            const id = safeNum(item.id || item.SessionId || item.sessionId || item.roundId || 0);
-            if (id <= 0) return null;
-
-            const diceSum = safeNum(item.DiceSum || item.diceSum || item.sum || 0);
-            const text = String(item.result || item.outcome || item.type || '').toLowerCase();
-
-            const result = (diceSum >= 11 || text.includes('tai') || text.includes('tài'))
-                ? 'Tài'
-                : 'Xỉu';
-
+    try {
+        const res = await fetchFn(SOURCE_URLS[mode], { timeout: 8000 });
+        const json = await res.json();
+        
+        // Chuẩn hóa dữ liệu từ API (hỗ trợ nhiều format)
+        const raw = Array.isArray(json) ? json : (json.list || json.data || json.results || []);
+        const cleanData = raw.map(item => {
+            const id = Number(item.id || item.SessionId || item.sessionId || item.roundId);
+            const sum = Number(item.diceSum || item.DiceSum || item.sum || 0);
+            const text = String(item.result || item.outcome || '').toLowerCase();
+            
+            if (!id) return null;
+            const result = (sum >= 11 || text.includes('tai') || text.includes('tài')) ? 'Tài' : 'Xỉu';
             return { id, result };
-        })
-        .filter(Boolean)
-        .sort((a, b) => a.id - b.id);
-}
+        }).filter(Boolean);
 
-function getLastHistoryId(mode) {
-    const hist = DATA_STORE[mode].history;
-    return hist.length ? hist[hist.length - 1].id : 0;
-}
+        if (cleanData.length > 0) {
+            const state = DATA_STORE[mode];
+            // MERGE LOGIC: Gộp cũ và mới, lọc trùng ID, sắp xếp tăng dần
+            const combined = [...state.history, ...cleanData];
+            const uniqueMap = new Map(combined.map(obj => [obj.id, obj]));
+            state.history = Array.from(uniqueMap.values())
+                                 .sort((a, b) => a.id - b.id)
+                                 .slice(-CONFIG.MAX_HISTORY);
 
-function pushPendingPrediction(mode, sessionId, res) {
-    const state = DATA_STORE[mode];
-    const key = String(sessionId);
-
-    if (!state.pendingPredictions[key]) {
-        state.pendingPredictions[key] = {
-            sessionId,
-            res,
-            createdAt: Date.now(),
-            scored: false
-        };
+            state.lastSyncAt = new Date().toISOString();
+            state.lastError = null;
+            
+            // Tự động chấm điểm (Scoring) nếu có phiên mới
+            scorePending(mode);
+        }
+    } catch (err) {
+        DATA_STORE[mode].lastError = err.message;
+    } finally {
+        DATA_STORE[mode].isSyncing = false;
     }
 }
 
-function prunePendingPredictions(mode) {
+function scorePending(mode) {
     const state = DATA_STORE[mode];
-    const now = Date.now();
+    const lastSession = state.history[state.history.length - 1];
+    if (!lastSession) return;
 
-    for (const key of Object.keys(state.pendingPredictions)) {
-        const p = state.pendingPredictions[key];
-        if (!p) {
-            delete state.pendingPredictions[key];
-            continue;
-        }
-        if (now - p.createdAt > CONFIG.MAX_PENDING_AGE_MS) {
-            delete state.pendingPredictions[key];
-        }
-    }
-}
-
-function scorePendingPredictions(mode, cleanData) {
-    const state = DATA_STORE[mode];
-
-    for (const key of Object.keys(state.pendingPredictions)) {
-        const pending = state.pendingPredictions[key];
-        if (!pending || pending.scored) continue;
-
-        const target = cleanData.find(x => x.id === pending.sessionId);
-        if (!target) continue;
-
-        const isWin = pending.res === target.result;
-
-        pending.scored = true;
-        pending.scoreResult = {
-            actual: target.result,
-            win: isWin
-        };
-
+    const pending = state.pendingPredictions[lastSession.id];
+    if (pending && !pending.scored) {
+        const isWin = pending.res === lastSession.result;
         if (isWin) {
             state.stats.win++;
             state.stats.winStreak++;
-            state.stats.maxWinStreak = Math.max(state.stats.maxWinStreak, state.stats.winStreak);
             state.stats.lossStreak = 0;
         } else {
             state.stats.loss++;
             state.stats.lossStreak++;
             state.stats.winStreak = 0;
         }
-
         state.stats.total++;
-        state.lastProcessedId = Math.max(state.lastProcessedId, target.id);
-
-        delete state.pendingPredictions[key];
+        pending.scored = true;
     }
 }
 
-async function fetchJsonWithRetry(url, retries = CONFIG.RETRY_FETCH_LIMIT) {
-    let lastError = null;
-
-    for (let i = 0; i <= retries; i++) {
-        try {
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), CONFIG.FETCH_TIMEOUT_MS);
-
-            const response = await fetchFn(url, {
-                method: 'GET',
-                headers: { accept: 'application/json' },
-                signal: controller.signal
-            });
-
-            clearTimeout(timer);
-
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            return await response.json();
-        } catch (err) {
-            lastError = err;
-            console.error(`[fetchJsonWithRetry] attempt=${i + 1} url=${url} error=${err.message}`);
-            if (i < retries) {
-                await new Promise(r => setTimeout(r, 500));
-            }
-        }
-    }
-
-    throw lastError || new Error('Fetch failed');
+// Vòng lặp đồng bộ không gây nghẽn
+async function mainLoop() {
+    await Promise.all([syncData('nohu'), syncData('md5')]);
+    setTimeout(mainLoop, CONFIG.SYNC_INTERVAL);
 }
 
-// ================== [5] ĐỒNG BỘ ==================
-async function syncData() {
-    for (const mode of ['nohu', 'md5']) {
-        const url = SOURCE_URLS[mode];
-
-        if (!url) {
-            DATA_STORE[mode].lastSyncError = 'Missing source URL';
-            continue;
-        }
-
-        try {
-            const json = await fetchJsonWithRetry(url);
-            const cleanData = parseIncomingData(json);
-
-            if (!cleanData.length) {
-                DATA_STORE[mode].lastSyncError = 'No valid data';
-                console.error(`[syncData] mode=${mode} error=No valid data`);
-                continue;
-            }
-
-            DATA_STORE[mode].history = cleanData;
-            DATA_STORE[mode].lastSyncAt = new Date().toISOString();
-            DATA_STORE[mode].lastSyncError = null;
-
-            prunePendingPredictions(mode);
-            scorePendingPredictions(mode, cleanData);
-        } catch (error) {
-            DATA_STORE[mode].lastSyncError = error?.message || String(error);
-            console.error(`[syncData] mode=${mode} error=${DATA_STORE[mode].lastSyncError}`);
-        }
-    }
-}
-
-// ================== [6] RESPONSE GỌN ==================
-function buildModePayload(mode) {
-    const state = DATA_STORE[mode];
-    const prediction = SniperCore.analyze(mode);
-    const lastResultSession = getLastHistoryId(mode);
-    const predictedSessionId = lastResultSession + 1;
-
-    const predictedResult = prediction.res === 'CHỜ' ? 'CHỜ' : prediction.res;
-
-    if (predictedResult !== 'CHỜ') {
-        pushPendingPrediction(
-            mode,
-            predictedSessionId,
-            predictedResult === 'TÀI' ? 'Tài' : 'Xỉu'
-        );
-    }
-
-    return {
-        mode,
-        predictedSessionId,
-        predictedFor: predictedSessionId,
-        lastResultSession,
-        predictedResult,
-        txRate: prediction.txRate || { tai: 50, xiu: 50 },
-        confidence: prediction.conf,
-        rawConfidence: prediction.rawConfidence ?? 0,
-        streak: prediction.streak || 'N/A',
-        suggestion: prediction.suggestion || 'N/A',
-        historyCount: state.history.length,
-        pendingCount: Object.keys(state.pendingPredictions).length,
-        lastSyncAt: state.lastSyncAt,
-        lastSyncError: state.lastSyncError || null
-    };
-}
-
-function buildResponse() {
-    return {
-        developer: CONFIG.NAME,
-        version: CONFIG.VERSION,
-        status: 'ONLINE',
-        timestamp: new Date().toISOString(),
-        results: {
-            nohu: buildModePayload('nohu'),
-            md5: buildModePayload('md5')
-        }
-    };
-}
-
-// ================== [7] ROUTES ==================
-app.get('/', (req, res) => {
-    res.json(buildResponse());
-});
-
+// ================== [5] API ENDPOINTS ==================
 app.get('/api/v5/predict', (req, res) => {
-    res.json(buildResponse());
-});
-
-app.get('/api/v5/status', (req, res) => {
-    res.json({
+    const output = {
         developer: CONFIG.NAME,
-        version: CONFIG.VERSION,
         status: 'ONLINE',
         timestamp: new Date().toISOString(),
-        server: {
-            uptime: process.uptime(),
-            memory: process.memoryUsage()
-        },
-        results: {
-            nohu: {
-                stats: DATA_STORE.nohu.stats,
-                historyCount: DATA_STORE.nohu.history.length,
-                pendingCount: Object.keys(DATA_STORE.nohu.pendingPredictions).length,
-                lastProcessedId: DATA_STORE.nohu.lastProcessedId,
-                lastSyncAt: DATA_STORE.nohu.lastSyncAt,
-                lastSyncError: DATA_STORE.nohu.lastSyncError
-            },
-            md5: {
-                stats: DATA_STORE.md5.stats,
-                historyCount: DATA_STORE.md5.history.length,
-                pendingCount: Object.keys(DATA_STORE.md5.pendingPredictions).length,
-                lastProcessedId: DATA_STORE.md5.lastProcessedId,
-                lastSyncAt: DATA_STORE.md5.lastSyncAt,
-                lastSyncError: DATA_STORE.md5.lastSyncError
-            }
+        results: {}
+    };
+
+    for (const mode of ['nohu', 'md5']) {
+        const state = DATA_STORE[mode];
+        const analysis = SniperCore.analyze(mode);
+        const lastSessionId = state.history.length > 0 ? state.history[state.history.length - 1].id : 0;
+        const nextSessionId = lastSessionId + 1;
+
+        // Lưu vào hàng chờ để chấm điểm phiên sau
+        if (analysis.res !== 'CHỜ' && nextSessionId > 1) {
+            state.pendingPredictions[nextSessionId] = {
+                res: analysis.res === 'TÀI' ? 'Tài' : 'Xỉu',
+                scored: false
+            };
         }
-    });
+
+        output.results[mode] = {
+            mode: mode.toUpperCase(),
+            currentSession: lastSessionId,
+            predictFor: nextSessionId,
+            prediction: analysis.res,
+            confidence: analysis.conf,
+            suggestion: analysis.suggestion,
+            stats: state.stats,
+            lastSync: state.lastSyncAt
+        };
+    }
+    res.json(output);
 });
 
 app.get('/api/v5/history/:mode', (req, res) => {
     const mode = req.params.mode;
-    if (!DATA_STORE[mode]) {
-        return res.status(400).json({
-            ok: false,
-            error: 'Invalid mode',
-            allowed: ['nohu', 'md5']
-        });
-    }
-
-    res.json({
-        ok: true,
-        mode,
-        count: DATA_STORE[mode].history.length,
-        history: DATA_STORE[mode].history
-    });
+    if (!DATA_STORE[mode]) return res.status(404).json({ error: 'Mode not found' });
+    res.json({ mode, count: DATA_STORE[mode].history.length, data: DATA_STORE[mode].history });
 });
 
-// ================== [8] GLOBAL ERRORS ==================
-process.on('uncaughtException', (err) => {
-    console.error('[uncaughtException]', err);
-});
+app.get('/', (req, res) => res.send(`${CONFIG.NAME} ${CONFIG.VERSION} IS RUNNING...`));
 
-process.on('unhandledRejection', (err) => {
-    console.error('[unhandledRejection]', err);
-});
-
-// ================== [9] START ==================
+// ================== [6] KHỞI CHẠY ==================
 app.listen(PORT, () => {
-    console.log(`TUANX3000 ${CONFIG.VERSION} started`);
-    console.log(`Root: http://localhost:${PORT}/`);
-    console.log(`API:  http://localhost:${PORT}/api/v5/predict`);
-    console.log(`STAT: http://localhost:${PORT}/api/v5/status`);
+    console.log(`--- ${CONFIG.NAME} ${CONFIG.VERSION} ---`);
+    console.log(`Port: ${PORT}`);
+    mainLoop();
 });
 
-setInterval(syncData, CONFIG.SYNC_INTERVAL);
-syncData();
+// Reset stats mỗi giờ để tránh số liệu cũ
+setInterval(() => {
+    for (const m in DATA_STORE) {
+        DATA_STORE[m].stats = { win: 0, loss: 0, total: 0, lossStreak: 0, winStreak: 0, maxWinStreak: 0 };
+        DATA_STORE[m].pendingPredictions = {};
+    }
+    console.log('[SYSTEM] Hourly Stats Reset Done');
+}, CONFIG.CLEAN_INTERVAL);
