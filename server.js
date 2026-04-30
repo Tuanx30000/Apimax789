@@ -1,8 +1,7 @@
 /**
  * =========================================================================================
- * 🛠️ TUANX3000 ULTIMATE V4.4 - SNIPER ENGINE (TOOL MODE)
- * 📱 Dành cho Tool / AShell / iPhone - Giao diện Text đơn giản, dễ đọc
- * 🔥 Phiên bản tổng hợp cuối: Dynamic Streak + Pattern + Markov + Entropy + Safety
+ * 🛠️ TUANX3000 ULTIMATE V4.4 - SNIPER ENGINE (JSON MODE)
+ * 📱 Xuất dữ liệu JSON cho Tool / AShell / App gọi API
  * =========================================================================================
  */
 
@@ -19,41 +18,41 @@ app.use(express.json());
 // ================== [1] CẤU HÌNH CHÍNH V4.4 ==================
 const VIP_CONFIG = {
     NAME: "Tuanx3000",
-    VERSION: "V4.4-TOOL",
-    MIN_CONFIDENCE: 71,           // Ngưỡng tối thiểu để ra lệnh
-    CAP_MIN: 63,                  // Confidence hiển thị thấp nhất
-    CAP_MAX: 94,                  // Confidence hiển thị cao nhất
-    MAX_HISTORY: 200,             // Số phiên lịch sử tối đa dùng để phân tích
-    STREAK_WINDOW: 130,           // Cửa sổ tính streak gần nhất
-    SYNC_INTERVAL: 2300,          // Thời gian đồng bộ dữ liệu (ms)
-    CLEAN_INTERVAL: 3600000,      // Reset thống kê mỗi 1 giờ
-    ENTROPY_THRESHOLD: 0.92,      // Ngưỡng entropy cao = bàn nhiễu
+    VERSION: "V4.4-JSON",
+    MIN_CONFIDENCE: 71,
+    CAP_MIN: 63,
+    CAP_MAX: 94,
+    MAX_HISTORY: 200,
+    STREAK_WINDOW: 130,
+    SYNC_INTERVAL: 2300,
+    CLEAN_INTERVAL: 3600000,
+    ENTROPY_THRESHOLD: 0.92,
 };
 
 // ================== [2] BỘ NHỚ DỮ LIỆU ==================
 const DATA_STORE = {
     nohu: {
-        history: [],                    // Lưu lịch sử kết quả
-        stats: { 
-            win: 0, 
-            loss: 0, 
-            total: 0, 
-            lossStreak: 0, 
-            winStreak: 0, 
-            maxWinStreak: 0 
+        history: [],
+        stats: {
+            win: 0,
+            loss: 0,
+            total: 0,
+            lossStreak: 0,
+            winStreak: 0,
+            maxWinStreak: 0
         },
-        lastProcessedId: 0,             // ID phiên đã xử lý thắng/thua
-        lastPrediction: null            // Lưu dự đoán lần trước để so sánh
+        lastProcessedId: 0,
+        lastPrediction: null
     },
     md5: {
         history: [],
-        stats: { 
-            win: 0, 
-            loss: 0, 
-            total: 0, 
-            lossStreak: 0, 
-            winStreak: 0, 
-            maxWinStreak: 0 
+        stats: {
+            win: 0,
+            loss: 0,
+            total: 0,
+            lossStreak: 0,
+            winStreak: 0,
+            maxWinStreak: 0
         },
         lastProcessedId: 0,
         lastPrediction: null
@@ -63,7 +62,14 @@ const DATA_STORE = {
 // Tự động reset thống kê mỗi giờ
 setInterval(() => {
     Object.keys(DATA_STORE).forEach(mode => {
-        DATA_STORE[mode].stats = { win: 0, loss: 0, total: 0, lossStreak: 0, winStreak: 0, maxWinStreak: 0 };
+        DATA_STORE[mode].stats = {
+            win: 0,
+            loss: 0,
+            total: 0,
+            lossStreak: 0,
+            winStreak: 0,
+            maxWinStreak: 0
+        };
         DATA_STORE[mode].lastProcessedId = 0;
     });
     console.log(`🔄 [SYSTEM] Đã reset thống kê tự động`);
@@ -71,8 +77,6 @@ setInterval(() => {
 
 // ================== [3] THUẬT TOÁN SNIPER CORE ==================
 const SniperCore = {
-
-    // Markov Chain tính xác suất chuyển tiếp
     calculateMarkov: (sequence) => {
         if (sequence.length < 6) return { probT: 0.5, strength: 0.3 };
 
@@ -95,7 +99,6 @@ const SniperCore = {
 
         let probT = (current.T + 1) / total;
 
-        // Kết hợp bias từ 30 tay gần nhất
         const biasT = (sequence.slice(-30).match(/T/g) || []).length / 30;
         probT = (probT * 0.65) + (biasT * 0.35);
 
@@ -107,7 +110,6 @@ const SniperCore = {
         };
     },
 
-    // Tính độ nhiễu của bàn (Entropy)
     calculateEntropy: (sequence) => {
         const sample = sequence.slice(-40);
         if (sample.length === 0) return 1.0;
@@ -116,7 +118,6 @@ const SniperCore = {
         return -(p * Math.log2(p) + (1 - p) * Math.log2(1 - p));
     },
 
-    // Phân tích Dynamic Streak (Bệt & Bẻ bệt)
     analyzeDynamicStreak: (sequence) => {
         const chunks = sequence.match(/(.)\1*/g) || [];
         if (chunks.length === 0) return null;
@@ -138,10 +139,10 @@ const SniperCore = {
 
         return {
             result: isBreak ? (currType === 'T' ? 'X' : 'T') : currType,
-            confidence: isBreak 
+            confidence: isBreak
                 ? Math.min(94, 84 + (currStreak - maxPast) * 3.5)
                 : 79 + Math.min(9, currStreak),
-            log: isBreak 
+            log: isBreak
                 ? `BẺ BỆT MẠNH (${currStreak} > ${maxPast})`
                 : `Theo bệt (${currStreak}/${maxPast})`,
             streakInfo: `${currType}${currStreak}`,
@@ -149,7 +150,6 @@ const SniperCore = {
         };
     },
 
-    // Nhận diện các mẫu cầu phổ biến
     patternMatcher: (sequence, lastResult) => {
         const patterns = [
             { regex: /TXTX$|XTXT$|TXTTXT$/, result: lastResult === 'T' ? 'X' : 'T', conf: 91, log: "Cầu nhảy 1-1 (Chop)" },
@@ -163,19 +163,15 @@ const SniperCore = {
         ];
 
         for (const p of patterns) {
-            if (p.regex.test(sequence)) {
-                return p;
-            }
+            if (p.regex.test(sequence)) return p;
         }
         return null;
     },
 
-    // Hàm phân tích chính - trả về kết quả dự đoán
     analyze: (mode) => {
         const state = DATA_STORE[mode];
         const history = state.history.slice(-VIP_CONFIG.MAX_HISTORY);
 
-        // Chưa đủ dữ liệu
         if (history.length < 45) {
             return {
                 res: "CHỜ",
@@ -190,7 +186,6 @@ const SniperCore = {
         const sequence = results.map(r => r === 'Tài' ? 'T' : 'X').join('');
         const lastResult = results[results.length - 1];
 
-        // Safety Layer - 3 Loss Kill Switch
         if (state.stats.lossStreak >= 3) {
             return {
                 res: "CHỜ",
@@ -201,7 +196,6 @@ const SniperCore = {
             };
         }
 
-        // Thu thập các phân tích
         const entropy = SniperCore.calculateEntropy(sequence);
         const streakAnalysis = SniperCore.analyzeDynamicStreak(sequence);
         const patternResult = SniperCore.patternMatcher(sequence, lastResult);
@@ -211,7 +205,6 @@ const SniperCore = {
         let finalConfidence = 68;
         let finalLog = '';
 
-        // Ưu tiên thứ tự phân tích
         if (streakAnalysis && streakAnalysis.isStrongBreak) {
             finalResult = streakAnalysis.result;
             finalConfidence = streakAnalysis.confidence;
@@ -226,13 +219,11 @@ const SniperCore = {
             finalLog = `Markov Ensemble (${Math.round(markov.probT * 100)}% Tài)`;
         }
 
-        // Điều chỉnh theo độ nhiễu
         if (entropy > VIP_CONFIG.ENTROPY_THRESHOLD) {
             finalConfidence = Math.max(60, finalConfidence - 12);
             finalLog += " [Bàn nhiễu cao]";
         }
 
-        // Lọc lệnh chất lượng thấp
         if (finalConfidence < VIP_CONFIG.MIN_CONFIDENCE) {
             return {
                 res: "CHỜ",
@@ -243,7 +234,6 @@ const SniperCore = {
             };
         }
 
-        // Áp dụng giới hạn confidence
         let displayConf = Math.max(VIP_CONFIG.CAP_MIN, Math.min(VIP_CONFIG.CAP_MAX, Math.floor(finalConfidence)));
         if (streakAnalysis && streakAnalysis.isStrongBreak) {
             displayConf = Math.min(VIP_CONFIG.CAP_MAX, displayConf + 3);
@@ -251,7 +241,6 @@ const SniperCore = {
 
         const resultText = finalResult === 'T' ? 'TÀI' : 'XỈU';
 
-        // Gợi ý mức cược
         let suggestion = "Cược nhẹ (20-30%)";
         if (displayConf >= 88) suggestion = "CƯỢC MẠNH (70-90%)";
         else if (displayConf >= 80) suggestion = "Cược vừa (45-65%)";
@@ -284,8 +273,8 @@ async function syncData() {
                 .map(item => ({
                     id: Number(item.id || item.SessionId || 0),
                     result: (Number(item.DiceSum || 0) >= 11 ||
-                             String(item.result || item.outcome || '').toUpperCase().includes('TAI') ||
-                             String(item.result || '').includes('Tài')) ? 'Tài' : 'Xỉu'
+                        String(item.result || item.outcome || '').toUpperCase().includes('TAI') ||
+                        String(item.result || '').includes('Tài')) ? 'Tài' : 'Xỉu'
                 }))
                 .filter(item => item.id > 0)
                 .sort((a, b) => a.id - b.id);
@@ -295,12 +284,13 @@ async function syncData() {
             const state = DATA_STORE[mode];
             const latest = cleanData[cleanData.length - 1];
 
-            // Cập nhật thống kê thắng thua
-            if (state.lastPrediction && 
-                state.lastPrediction.id === latest.id && 
-                state.lastProcessedId < latest.id) {
-
+            if (
+                state.lastPrediction &&
+                state.lastPrediction.id === latest.id &&
+                state.lastProcessedId < latest.id
+            ) {
                 const isWin = state.lastPrediction.res === latest.result;
+
                 if (isWin) {
                     state.stats.win++;
                     state.stats.winStreak++;
@@ -311,6 +301,7 @@ async function syncData() {
                     state.stats.lossStreak++;
                     state.stats.winStreak = 0;
                 }
+
                 state.stats.total++;
                 state.lastProcessedId = latest.id;
             }
@@ -322,77 +313,35 @@ async function syncData() {
     }
 }
 
-// ================== [5] GIAO DIỆN TOOL ĐƠN GIẢN ==================
-app.get('/', (req, res) => {
+// ================== [5] HÀM TẠO JSON CHUNG ==================
+function buildJsonResponse() {
     const nohu = SniperCore.analyze('nohu');
     const md5 = SniperCore.analyze('md5');
 
-    const html = `
-<!DOCTYPE html>
-<html lang="vi">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-    <title>TUANX3000 V4.4 TOOL</title>
-    <style>
-        body { font-family: Arial, sans-serif; background:#111111; color:#00ff00; padding:15px; margin:0; line-height:1.6; }
-        h1 { color:#00ffff; text-align:center; }
-        .box { background:#1a1a1a; border:1px solid #00aa00; border-radius:8px; padding:15px; margin:12px 0; }
-        .mode { font-size:1.3em; font-weight:bold; color:#ffff00; }
-        .result { font-size:2.3em; font-weight:bold; text-align:center; margin:10px 0; }
-        .tai { color:#00ff88; }
-        .xiu { color:#ff5555; }
-        .conf { font-size:1.7em; color:#ffdd00; text-align:center; }
-        .info { color:#cccccc; }
-        .suggestion { color:#00ffcc; font-weight:bold; }
-        .footer { text-align:center; color:#555555; margin-top:25px; font-size:0.85em; }
-    </style>
-</head>
-<body>
-    <h1>TUANX3000 V4.4 TOOL</h1>
+    return {
+        developer: VIP_CONFIG.NAME,
+        version: VIP_CONFIG.VERSION,
+        status: "ONLINE",
+        timestamp: new Date().toISOString(),
+        results: {
+            nohu,
+            md5
+        }
+    };
+}
 
-    <div class="box">
-        <div class="mode">🔴 NOHU</div>
-        <div class="result ${nohu.res === 'TÀI' ? 'tai' : nohu.res === 'XỈU' ? 'xiu' : ''}">${nohu.res}</div>
-        <div class="conf">${nohu.conf}</div>
-        <div class="info">
-            Streak: ${nohu.streak} | Winrate: ${nohu.winrate}<br>
-            Phân tích: ${nohu.log}
-        </div>
-        <div class="suggestion">💰 Gợi ý: ${nohu.suggestion}</div>
-    </div>
-
-    <div class="box">
-        <div class="mode">🔵 MD5</div>
-        <div class="result ${md5.res === 'TÀI' ? 'tai' : md5.res === 'XỈU' ? 'xiu' : ''}">${md5.res}</div>
-        <div class="conf">${md5.conf}</div>
-        <div class="info">
-            Streak: ${md5.streak} | Winrate: ${md5.winrate}<br>
-            Phân tích: ${md5.log}
-        </div>
-        <div class="suggestion">💰 Gợi ý: ${md5.suggestion}</div>
-    </div>
-
-    <div class="footer">
-        Tự động cập nhật mỗi 3 giây • ${new Date().toLocaleString('vi-VN')}
-    </div>
-
-    <script>
-        setInterval(() => { location.reload(); }, 3000);
-    </script>
-</body>
-</html>`;
-
-    res.send(html);
+// ================== [6] ROUTE JSON ==================
+app.get('/', (req, res) => {
+    res.json(buildJsonResponse());
 });
 
-// ================== [6] API JSON (Dành cho tool gọi) ==================
 app.get('/api/v4.4/predict', (req, res) => {
     const output = {};
+
     ['nohu', 'md5'].forEach(mode => {
         const pred = SniperCore.analyze(mode);
-        const lastId = DATA_STORE[mode].history.length 
-            ? DATA_STORE[mode].history[DATA_STORE[mode].history.length - 1].id 
+        const lastId = DATA_STORE[mode].history.length
+            ? DATA_STORE[mode].history[DATA_STORE[mode].history.length - 1].id
             : 0;
 
         DATA_STORE[mode].lastPrediction = {
@@ -415,14 +364,37 @@ app.get('/api/v4.4/predict', (req, res) => {
     });
 });
 
+// JSON xem trạng thái nhanh
+app.get('/api/v4.4/status', (req, res) => {
+    res.json({
+        developer: VIP_CONFIG.NAME,
+        version: VIP_CONFIG.VERSION,
+        status: "ONLINE",
+        timestamp: new Date().toISOString(),
+        store: {
+            nohu: {
+                stats: DATA_STORE.nohu.stats,
+                historyCount: DATA_STORE.nohu.history.length,
+                lastProcessedId: DATA_STORE.nohu.lastProcessedId
+            },
+            md5: {
+                stats: DATA_STORE.md5.stats,
+                historyCount: DATA_STORE.md5.history.length,
+                lastProcessedId: DATA_STORE.md5.lastProcessedId
+            }
+        }
+    });
+});
+
 // ================== [7] KHỞI CHẠY SERVER ==================
 app.listen(PORT, () => {
-    console.log(`\n🚀 TUANX3000 ${VIP_CONFIG.VERSION} - TOOL MODE đã khởi động thành công`);
-    console.log(`🌐 Giao diện Tool: http://localhost:${PORT}`);
-    console.log(`📡 API JSON: http://localhost:${PORT}/api/v4.4/predict\n`);
+    console.log(`\n🚀 TUANX3000 ${VIP_CONFIG.VERSION} - JSON MODE đã khởi động`);
+    console.log(`🌐 JSON Root: http://localhost:${PORT}/`);
+    console.log(`📡 API JSON: http://localhost:${PORT}/api/v4.4/predict`);
+    console.log(`📊 STATUS: http://localhost:${PORT}/api/v4.4/status\n`);
 });
 
 // Bắt đầu đồng bộ dữ liệu
 setInterval(syncData, VIP_CONFIG.SYNC_INTERVAL);
 
-console.log("TUANX3000 V4.4 TOOL - Ready");
+console.log("TUANX3000 V4.4 JSON MODE - Ready");
