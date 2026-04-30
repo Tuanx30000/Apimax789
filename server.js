@@ -38,8 +38,8 @@ const VIP_CONFIG = {
 
 // ================== [2] LINK API ==================
 const SOURCE_URLS = {
-    nohu: process.env.NOHU_URL || 'https://taixiu.maksh3979madfw.com/api/luckydice/GetSoiCau?access_token=YOUR_TOKEN_HERE',
-    md5: process.env.MD5_URL || 'https://taixiumd5.maksh3979madfw.com/api/md5luckydice/GetSoiCau?access_token=YOUR_TOKEN_HERE'
+    nohu: process.env.NOHU_URL || 'https://taixiu.maksh3979madfw.com/api/luckydice/GetSoiCau?',
+    md5: process.env.MD5_URL || 'https://taixiumd5.maksh3979madfw.com/api/md5luckydice/GetSoiCau?'
 };
 
 // ================== [3] BỘ NHỚ DỮ LIỆU ==================
